@@ -1,0 +1,69 @@
+# Configuration file for BIGCLAM Breast Cancer Subtype Clustering
+
+# Data paths
+data:
+  input_file: "data/gene_expression_data_target_added.csv"
+  output_file: "data/reduced_data_BC_label.csv"
+  save_path: "data/BIGCLAM_data/"
+  
+# Dataset preparation paths
+dataset_preparation:
+  tcga:
+    clinical: "data/brca_tcga_clinical_data.tsv"
+    expression: "data/Human__TCGA_BRCA__UNC__RNAseq__HiSeq_RNA__01_28_2016__BI__Gene__Firehose_RSEM_log2.cct.gz"
+    output: "data/tcga_brca_data_target_added.csv"
+  gse96058:
+    clinical: "data/GSE96058_transcript_expression_3273_samples_and_136_replicates.csv"
+    expression: "data/GSE96058_gene_expression_3273_samples_and_136_replicates_transformed.csv"
+    output: "data/gse96058_data_target_added.csv"
+  
+# Preprocessing parameters
+preprocessing:
+  variance_threshold: 13
+  similarity_threshold: 0.4
+  chunk_size: null  # Auto-detect: use 10000 for files >500MB, null for smaller files
+  
+# BIGCLAM parameters
+bigclam:
+  max_communities: 10
+  iterations: 100
+  learning_rate: 0.08
+  num_communities: 4  # Final number of communities to use
+  use_sparse_matrix: true  # Use sparse adjacency for >1000 samples (memory efficient)
+  
+# Classifier parameters
+classifiers:
+  mlp:
+    num_runs: 10
+    num_epochs: 200
+    learning_rate: 0.001
+    patience: 10
+    weight_decay: 0.0001
+    dropout_rate: 0.3
+    hidden_layers: [80, 50, 20]
+  
+  svm:
+    num_runs: 10
+    kernel: "rbf"
+    C: 0.1
+    gamma: "scale"
+    probability: true
+    
+# Data splitting parameters
+data_splitting:
+  test_size: 0.2
+  valid_size: 0.2
+  train_size: 0.6
+  random_state: 42
+  
+# Augmentation parameters
+augmentation:
+  noise_mean: 0.0
+  noise_std: 0.1
+  
+# Output paths
+output:
+  results_dir: "results/"
+  models_dir: "models/"
+  visualizations_dir: "results/"
+
