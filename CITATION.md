@@ -16,7 +16,7 @@ If you use this code in your research, please cite:
 
 ## Text Citation
 
-[Your Name]. (2024). New Clustering of Breast Cancer Subtypes Using Gene Expression Data and the BIGCLAM Method (Version 1.0.0) [Computer software]. https://github.com/[yourusername]/bigclam-breast-cancer
+saeedsamimi. (2025). New Clustering of Breast Cancer Subtypes Using Gene Expression Data and the BIGCLAM Method (Version 1.0.0) [Computer software]. https://github.com/saeedsamimi995/bigclam-breast-cancer
 
 ## Related Papers
 
