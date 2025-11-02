@@ -9,14 +9,14 @@ If you use this code in your research, please cite:
   title = {New Clustering of Breast Cancer Subtypes Using Gene Expression Data and the BIGCLAM Method},
   author = {Saeed Samimi et all},
   year = {2025},
-  url = {https://github.com/saeedsamimi995/bigclam-breast-cancer},
+  url = {https://github.com/saeedsamimi995/New-Clustering-of-Breast-Cancer-Subtypes-Using-Gene-Expression-Data-and-the-BIGCLAM-Method},
   note = {Software version 1.0.0}
 }
 ```
 
 ## Text Citation
 
-saeedsamimi. (2025). New Clustering of Breast Cancer Subtypes Using Gene Expression Data and the BIGCLAM Method (Version 1.0.0) [Computer software]. https://github.com/saeedsamimi995/bigclam-breast-cancer
+saeedsamimi. (2025). New Clustering of Breast Cancer Subtypes Using Gene Expression Data and the BIGCLAM Method (Version 1.0.0) [Computer software]. [https://github.com/saeedsamimi995/New-Clustering-of-Breast-Cancer-Subtypes-Using-Gene-Expression-Data-and-the-BIGCLAM-Method]
 
 ## Related Papers
 
