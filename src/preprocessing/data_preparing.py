@@ -2,8 +2,8 @@
 Data Preparation Script
 
 Prepares TCGA BRCA and GSE96058 datasets:
-- Adds PAM50 column from clinical dataset as target to expression dataset
-- Output format: Genes as rows, Samples as columns, PAM50 as last row
+- Adds oncotree column (for TCGA) or PAM50 column (for GSE96058) from clinical dataset as target to expression dataset
+- Output format: Genes as rows, Samples as columns, oncotree/PAM50 as last row
 """
 
 import pandas as pd
@@ -40,7 +40,7 @@ def prepare_tcga_brca_data(clinical_file, expression_file, output_file):
     """
     Prepare TCGA BRCA data.
     
-    Format: Genes as rows, Samples as columns, PAM50 as last column.
+    Format: Genes as rows, Samples as columns, oncotree as last column.
     """
     print("=" * 80)
     print("PREPARING TCGA BRCA DATA")
@@ -60,38 +60,38 @@ def prepare_tcga_brca_data(clinical_file, expression_file, output_file):
     if sample_id_col is None:
         sample_id_col = [c for c in clinical.columns if 'ID' in c.upper()][0]
     
-    # Find PAM50/subtype column - use Oncotree Code as surrogate for TCGA BRCA
-    pam50_col = None
-    for pattern in ['PAM50', 'pam50 subtype', 'intrinsic subtype', 'molecular subtype']:
-        cols = [c for c in clinical.columns if pattern.upper() in c.upper()]
-        if cols:
-            pam50_col = cols[0]
+    # Find Oncotree Code column for TCGA BRCA tumor subtype classification
+    oncotree_col = None
+    for col_name in ['Oncotree Code', 'OncotreeCode', 'Oncotree_Code']:
+        if col_name in clinical.columns:
+            oncotree_col = col_name
             break
     
-    # If PAM50 not found, use Oncotree Code as surrogate (tumor subtype classification)
-    if not pam50_col:
-        for col_name in ['Oncotree Code', 'OncotreeCode']:
-            if col_name in clinical.columns:
-                pam50_col = col_name
-                print(f"    Using '{pam50_col}' as surrogate for PAM50 (Oncotree classification)")
+    # If Oncotree Code not found, try PAM50 as fallback
+    if not oncotree_col:
+        for pattern in ['PAM50', 'pam50 subtype', 'intrinsic subtype', 'molecular subtype']:
+            cols = [c for c in clinical.columns if pattern.upper() in c.upper()]
+            if cols:
+                oncotree_col = cols[0]
+                print(f"    Using '{oncotree_col}' as fallback (Oncotree Code not found)")
                 break
     
-    if pam50_col:
-        print(f"    [OK] Found subtype column: {pam50_col}")
+    if oncotree_col:
+        print(f"    [OK] Found subtype column: {oncotree_col}")
     else:
         print("    [WARNING] No subtype column found - will create file without subtype labels")
     
-    # Create mapping: normalized_sample_id -> pam50_label
+    # Create mapping: normalized_sample_id -> oncotree_label
     clinical_samples = clinical[sample_id_col].astype(str).values
-    sample_to_pam50 = {}
+    sample_to_oncotree = {}
     for idx, sample_id in enumerate(clinical_samples):
         norm_id = normalize_tcga_id(sample_id)
-        if pam50_col:
-            label = str(clinical.iloc[idx][pam50_col]).strip()
+        if oncotree_col:
+            label = str(clinical.iloc[idx][oncotree_col]).strip()
             if label and label not in ['nan', 'NA', '']:
-                sample_to_pam50[norm_id] = label
+                sample_to_oncotree[norm_id] = label
     
-    print(f"    Samples with PAM50: {len(sample_to_pam50)}")
+    print(f"    Samples with oncotree labels: {len(sample_to_oncotree)}")
     
     # Load expression data
     print("\n[2/4] Loading expression data...")
@@ -128,29 +128,29 @@ def prepare_tcga_brca_data(clinical_file, expression_file, output_file):
     
     # Find matching samples
     matched_samples = []
-    pam50_labels = []
+    oncotree_labels = []
     
     for norm_id, orig_cols in norm_to_original.items():
         matched_samples.append(orig_cols[0])  # Use first matching column
-        if norm_id in sample_to_pam50:
-            pam50_labels.append(sample_to_pam50[norm_id])
+        if norm_id in sample_to_oncotree:
+            oncotree_labels.append(sample_to_oncotree[norm_id])
         else:
-            pam50_labels.append('Unknown')
+            oncotree_labels.append('Unknown')
     
     print(f"    Matched: {len(matched_samples):,} samples")
-    print(f"    With PAM50 labels: {sum(1 for x in pam50_labels if x != 'Unknown'):,}")
+    print(f"    With oncotree labels: {sum(1 for x in oncotree_labels if x != 'Unknown'):,}")
     
     # Filter expression to matched samples
     expression_matched = expression[matched_samples].copy()
     
     # Transpose: genes as rows, samples as columns
-    print("\n[4/4] Transposing and adding PAM50...")
+    print("\n[4/4] Transposing and adding oncotree...")
     expression_t = expression_matched.T  # Now: samples x genes
     
-    # Add PAM50 as last column
-    expression_t['PAM50'] = pam50_labels
+    # Add oncotree as last column
+    expression_t['oncotree'] = oncotree_labels
     
-    # Transpose back: genes (including PAM50) as rows, samples as columns
+    # Transpose back: genes (including oncotree) as rows, samples as columns
     expression_final = expression_t.T
     
     # Save
@@ -162,7 +162,7 @@ def prepare_tcga_brca_data(clinical_file, expression_file, output_file):
     print(f"    Final shape: {expression_final.shape}")
     print(f"    Genes (rows): {expression_final.shape[0]:,}")
     print(f"    Samples (columns): {expression_final.shape[1]:,}")
-    print(f"    PAM50 labels: {sum(1 for x in pam50_labels if x != 'Unknown'):,}")
+    print(f"    oncotree labels: {sum(1 for x in oncotree_labels if x != 'Unknown'):,}")
     
     return output_file
 
@@ -268,7 +268,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--dataset', 
         choices=['tcga', 'gse96058', 'both'],
-        default='both',
+        default='tcga',
         help='Which dataset(s) to process'
     )
     

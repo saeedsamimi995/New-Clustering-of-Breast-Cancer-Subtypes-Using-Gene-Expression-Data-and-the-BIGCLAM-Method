@@ -228,14 +228,16 @@ def analyze_cross_dataset_consistency(processed_dir='data/processed',
     output_dir = Path(output_dir)
     
     # Load TCGA data
-    tcga_processed = processed_dir / "tcga_brca_data_target_added_processed.npy"
-    tcga_communities = clustering_dir / "tcga_brca_data_target_added_communities.npy"
-    tcga_membership = clustering_dir / "tcga_brca_data_target_added_communities_membership.npy"
+    # Note: Output files no longer include "_target_added" suffix since target is removed from processed data
+    tcga_processed = processed_dir / "tcga_brca_data_processed.npy"
+    tcga_communities = clustering_dir / "tcga_brca_data_communities.npy"
+    tcga_membership = clustering_dir / "tcga_brca_data_communities_membership.npy"
     
     # Load GSE data
-    gse_processed = processed_dir / "gse96058_data_target_added_processed.npy"
-    gse_communities = clustering_dir / "gse96058_data_target_added_communities.npy"
-    gse_membership = clustering_dir / "gse96058_data_target_added_communities_membership.npy"
+    # Note: Output files no longer include "_target_added" suffix since target is removed from processed data
+    gse_processed = processed_dir / "gse96058_data_processed.npy"
+    gse_communities = clustering_dir / "gse96058_data_communities.npy"
+    gse_membership = clustering_dir / "gse96058_data_communities_membership.npy"
     
     # Check if files exist
     if not all([f.exists() for f in [tcga_processed, tcga_communities, tcga_membership,

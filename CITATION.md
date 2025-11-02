@@ -50,5 +50,3 @@ If you use these datasets, please cite the following:
 
 **Data Access:**
 - GEO Database: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE96058
-- Direct Link: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE96058
-
