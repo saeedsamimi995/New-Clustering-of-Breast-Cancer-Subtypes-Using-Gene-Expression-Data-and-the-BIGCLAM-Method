@@ -5,11 +5,11 @@ If you use this code in your research, please cite:
 ## BibTeX
 
 ```bibtex
-@software{bigclam_breast_cancer_2024,
+@software{bigclam_breast_cancer_2025,
   title = {New Clustering of Breast Cancer Subtypes Using Gene Expression Data and the BIGCLAM Method},
-  author = {[Your Name]},
-  year = {2024},
-  url = {https://github.com/[yourusername]/bigclam-breast-cancer},
+  author = {[Saeed Samimi et all]},
+  year = {2025},
+  url = {https://github.com/saeedsamimi995/bigclam-breast-cancer},
   note = {Software version 1.0.0}
 }
 ```
