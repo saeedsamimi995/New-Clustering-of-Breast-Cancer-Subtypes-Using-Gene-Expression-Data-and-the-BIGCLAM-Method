@@ -19,17 +19,17 @@ dataset_preparation:
   
 # Preprocessing parameters
 preprocessing:
-  variance_threshold: 13
+  variance_threshold: "mean"  # Use "mean" to filter by mean variance, or numeric value for fixed threshold
   similarity_threshold: 0.4
   chunk_size: null  # Auto-detect: use 10000 for files >500MB, null for smaller files
   
 # BIGCLAM parameters
 bigclam:
-  max_communities: 10
-  iterations: 100
-  learning_rate: 0.08
-  num_communities: 4  # Final number of communities to use
-  use_sparse_matrix: true  # Use sparse adjacency for >1000 samples (memory efficient)
+  max_communities: 10  # Maximum communities to search (model finds optimal using AIC)
+  iterations: 100  # Optimization iterations per community number
+  learning_rate: 0.08  # Adam optimizer learning rate
+  # Note: Optimal number of communities is automatically determined using AIC
+  # The model tests 1 to max_communities and selects the best
   
 # Classifier parameters
 classifiers:

@@ -1,14 +1,11 @@
 """Data preprocessing module for BIGCLAM project."""
 
-from .data_loader import load_data, apply_variance_threshold
-from .data_preprocessing import augment_data, split_data, normalize_data, encode_labels
+from .data_preparing import prepare_tcga_brca_data, prepare_gse96058_data
+from .data_preprocessing import preprocess_data
 
 __all__ = [
-    'load_data', 
-    'apply_variance_threshold',
-    'augment_data',
-    'split_data',
-    'normalize_data',
-    'encode_labels'
+    'prepare_tcga_brca_data',
+    'prepare_gse96058_data',
+    'preprocess_data'
 ]
 

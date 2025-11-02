@@ -17,18 +17,21 @@ import argparse
 import sys
 from pathlib import Path
 import yaml
-from data_preparing import prepare_tcga_brca_data, prepare_gse96058_data
-from data_preprocessing import preprocess_data
-from graph_construction import construct_graphs
-from clustering import cluster_all_graphs
-from evaluators import evaluate_all_datasets
-from visualizers import create_all_visualizations
-from interpreters import interpret_results, analyze_overlap
-from cross_dataset_analysis import analyze_cross_dataset_consistency
-from classifiers import validate_clustering_with_classifiers
+
+# Add src to path for imports
+sys.path.insert(0, str(Path(__file__).parent / "src"))
+
+from src.preprocessing import prepare_tcga_brca_data, prepare_gse96058_data, preprocess_data
+from src.graph import construct_graphs
+from src.clustering import cluster_all_graphs
+from src.evaluation import evaluate_all_datasets
+from src.visualization import create_all_visualizations
+from src.interpretation import interpret_results, analyze_overlap
+from src.analysis import analyze_cross_dataset_consistency
+from src.classifiers import validate_clustering_with_classifiers
 
 
-def load_config(config_path='config/config.yaml'):
+def load_config(config_path='config/config.yml'):
     """Load configuration from YAML file."""
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
@@ -38,7 +41,7 @@ def main():
     parser = argparse.ArgumentParser(
         description='Complete BIGCLAM pipeline for breast cancer subtype clustering'
     )
-    parser.add_argument('--config', type=str, default='config/config.yaml', help='Config file')
+    parser.add_argument('--config', type=str, default='config/config.yml', help='Config file')
     parser.add_argument('--skip_prep', action='store_true', help='Skip data preparation')
     parser.add_argument('--skip_clustering', action='store_true', help='Skip clustering (use existing results)')
     parser.add_argument('--skip_classification', action='store_true', help='Skip classification validation')
@@ -96,7 +99,7 @@ def main():
         print("="*80)
         
         preprocessing_config = config.get('preprocessing', {})
-        variance_threshold = preprocessing_config.get('variance_threshold', 13)
+        variance_threshold = preprocessing_config.get('variance_threshold', 'mean')
         
         # Process TCGA BRCA
         tcga_output = config['dataset_preparation']['tcga']['output']

@@ -9,9 +9,7 @@ from pathlib import Path
 import pickle
 import sys
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
-from bigclam.bigclam_model import train_bigclam
+from ..bigclam.bigclam_model import train_bigclam
 
 
 def cluster_data(adjacency, max_communities=10, iterations=100, lr=0.08):

@@ -1,174 +1,200 @@
-"""Data preprocessing including augmentation and splitting with memory optimization."""
+"""
+Data Preprocessing Module
+
+Handles:
+1. Loading prepared data (genes x samples with target in last row)
+2. Dropping target labels
+3. Feature reduction via variance threshold
+4. Log2 transformation
+5. Z-score normalization across samples
+"""
 
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
-import gc
+from pathlib import Path
+import pickle
+from sklearn.feature_selection import VarianceThreshold
+from sklearn.preprocessing import StandardScaler
 
 
-def augment_data(X, noise_mean=0.0, noise_std=0.1):
+def load_data_with_target(file_path):
     """
-    Augment data by adding random noise to balance classes.
-    Memory-efficient version using batch augmentation.
+    Load gene expression data with target labels.
     
     Args:
-        X (pd.DataFrame): Input dataframe with features and labels (last column).
-        noise_mean (float): Mean of noise distribution.
-        noise_std (float): Standard deviation of noise distribution.
+        file_path: Path to CSV with genes as rows, samples as columns, target as last row
         
     Returns:
-        pd.DataFrame: Augmented dataframe.
+        tuple: (expression_data, target_labels, gene_names, sample_names)
     """
-    # Separate features and labels
-    features = X.iloc[:, :-1].values
-    labels = X.iloc[:, -1].values
+    print(f"\n[Loading] {file_path}...")
+    df = pd.read_csv(file_path, low_memory=False)
     
-    # Find the maximum number of samples among all classes
-    max_samples = max(np.sum(labels == label) for label in set(labels))
+    # Get sample names (column headers, skip first which is gene names)
+    sample_names = df.columns[1:].values
     
-    # Create a dictionary to store the indices of samples for each class
-    class_indices = {label: np.where(labels == label)[0] for label in set(labels)}
+    # Get target labels from last row
+    last_row = df.iloc[-1, :].values
+    target_labels = last_row[1:]  # Skip first element which is row name
     
-    # Memory-efficient batch augmentation
-    augmented_data_list = []
+    # Get gene names (all rows except last)
+    gene_names = df.iloc[:-1, 0].values
     
-    # Augment each class to reach the maximum number of samples
-    for label, indices in class_indices.items():
-        # Calculate the number of augmentations needed for this class
-        num_augmentations = max_samples - len(indices)
+    # Get expression data (all rows except last, all columns except first)
+    expression_data = df.iloc[:-1, 1:].values.T  # Transpose: samples x genes
+    print(f"    Loaded: {expression_data.shape[0]} samples, {expression_data.shape[1]} genes")
+    
+    return expression_data, target_labels, gene_names, sample_names
+
+
+def apply_variance_filter(data, threshold=13):
+    """
+    Filter features with variance below threshold.
+    
+    Args:
+        data: numpy array of shape (n_samples, n_features)
+        threshold: variance threshold. Can be:
+                   - numeric value: use as fixed threshold
+                   - "mean": use mean variance of all features as threshold
         
-        if num_augmentations > 0:
-            # Randomly sample existing examples from this class
-            sampled_indices = np.random.choice(indices, num_augmentations, replace=True)
-            
-            # Batch augmentation for memory efficiency
-            sampled_features = features[sampled_indices]
-            noise = np.random.normal(noise_mean, noise_std, sampled_features.shape)
-            augmented_features = sampled_features + noise
-            augmented_labels = np.full((num_augmentations, 1), label)
-            
-            # Stack features and labels
-            augmented_batch = np.hstack([augmented_features, augmented_labels])
-            augmented_data_list.append(augmented_batch)
-    
-    # Convert the augmented data to a DataFrame
-    if augmented_data_list:
-        augmented_array = np.vstack(augmented_data_list)
-        augmented_df = pd.DataFrame(augmented_array, columns=X.columns)
-        # Concatenate the original and augmented data
-        augmented_data = pd.concat([X, augmented_df], ignore_index=True)
-        
-        # Free memory
-        del augmented_array, augmented_df
-        gc.collect()
+    Returns:
+        tuple: (filtered_data, selected_feature_indices)
+    """
+    # Calculate threshold if "mean" is specified
+    if isinstance(threshold, str) and threshold.lower() == "mean":
+        feature_variances = np.var(data, axis=0)
+        threshold_value = np.mean(feature_variances)
+        print(f"\n[Variance Filter] Using mean variance as threshold...")
+        print(f"    Mean variance: {threshold_value:.4f}")
     else:
-        augmented_data = X.copy()
+        threshold_value = float(threshold)
+        print(f"\n[Variance Filter] Threshold={threshold_value}...")
     
-    class_counts = augmented_data.iloc[:, -1].value_counts()
-    print("Class counts after augmentation:\n", class_counts)
+    var_threshold = VarianceThreshold(threshold=threshold_value)
+    data_filtered = var_threshold.fit_transform(data)
+    selected_features = var_threshold.get_support()
+    n_kept = selected_features.sum()
+    n_total = len(selected_features)
+    print(f"    Kept {n_kept:,}/{n_total:,} features ({n_kept/n_total*100:.1f}%)")
     
-    return augmented_data
+    return data_filtered, np.where(selected_features)[0]
 
 
-def split_data(augmented_data, test_size=0.2, valid_size=0.2, random_state=None):
+def apply_log2_transform(data):
     """
-    Split data into train, validation, and test sets with stratified sampling.
+    Apply log2(x+1) transformation to handle zeros.
     
     Args:
-        augmented_data (pd.DataFrame): Dataframe with features and labels (last column).
-        test_size (float): Proportion of data for test set.
-        valid_size (float): Proportion of data for validation set.
-        random_state (int, optional): Random state for reproducibility.
+        data: numpy array
         
     Returns:
-        tuple: (X_train, X_valid, X_test, y_train, y_valid, y_test) as numpy arrays.
+        numpy array: log2-transformed data
     """
-    if random_state is not None:
-        np.random.seed(random_state)
-    
-    # Initialize empty DataFrames for train, validation, and test sets
-    X_train = pd.DataFrame()
-    X_valid = pd.DataFrame()
-    X_test = pd.DataFrame()
-    
-    # Iterate over each class
-    for class_label in augmented_data.iloc[:, -1].unique():
-        # Filter data for the current class
-        class_data = augmented_data[augmented_data.iloc[:, -1] == class_label].copy()
-        
-        # Shuffle class data
-        class_data = class_data.sample(frac=1, random_state=random_state).reset_index(drop=True)
-        
-        # Calculate the number of samples for each split
-        total_samples = len(class_data)
-        test_n = int(test_size * total_samples)
-        valid_n = int(valid_size * total_samples)
-        
-        # Split the data
-        test_data = class_data.iloc[:test_n]
-        valid_data = class_data.iloc[test_n:test_n + valid_n]
-        train_data = class_data.iloc[test_n + valid_n:]
-        
-        # Append to the respective sets
-        X_test = pd.concat([X_test, test_data])
-        X_valid = pd.concat([X_valid, valid_data])
-        X_train = pd.concat([X_train, train_data])
-    
-    # Shuffle the datasets
-    X_test = X_test.sample(frac=1, random_state=random_state).reset_index(drop=True)
-    X_valid = X_valid.sample(frac=1, random_state=random_state).reset_index(drop=True)
-    X_train = X_train.sample(frac=1, random_state=random_state).reset_index(drop=True)
-    
-    # Verify the splits
-    print(f'Test set size: {X_test.shape}')
-    print(f'Validation set size: {X_valid.shape}')
-    print(f'Train set size: {X_train.shape}')
-    
-    # Define feature columns and target column for each set
-    y_train = X_train.iloc[:, -1]
-    y_valid = X_valid.iloc[:, -1]
-    y_test = X_test.iloc[:, -1]
-    
-    X_train = X_train.iloc[:, :-1]
-    X_valid = X_valid.iloc[:, :-1]
-    X_test = X_test.iloc[:, :-1]
-    
-    return X_train, X_valid, X_test, y_train, y_valid, y_test
+    print("\n[Log2 Transform]...")
+    data_transformed = np.log2(data + 1)
+    print(f"    Values: min={data_transformed.min():.2f}, max={data_transformed.max():.2f}, mean={data_transformed.mean():.2f}")
+    return data_transformed
 
 
-def normalize_data(X_train, X_valid, X_test, feature_range=(-1, 1)):
+def apply_zscore_normalize(data):
     """
-    Normalize data using MinMaxScaler.
+    Normalize data across samples (rows) using z-score.
     
     Args:
-        X_train, X_valid, X_test: Training, validation, and test feature matrices.
-        feature_range (tuple): Range for scaling.
+        data: numpy array of shape (n_samples, n_features)
         
     Returns:
-        tuple: (X_train_norm, X_valid_norm, X_test_norm, scaler) normalized data and scaler.
+        tuple: (normalized_data, scaler_object)
     """
-    scaler = MinMaxScaler(feature_range=feature_range)
-    X_train_norm = scaler.fit_transform(X_train)
-    X_valid_norm = scaler.transform(X_valid)
-    X_test_norm = scaler.transform(X_test)
-    
-    return X_train_norm, X_valid_norm, X_test_norm, scaler
+    print("\n[Z-score Normalization]...")
+    scaler = StandardScaler()
+    data_normalized = scaler.fit_transform(data)
+    print(f"    Mean: {data_normalized.mean():.6f}, Std: {data_normalized.std():.6f}")
+    return data_normalized, scaler
 
 
-def encode_labels(y_train, y_valid, y_test):
+def preprocess_data(input_file, output_dir='data/processed', variance_threshold="mean", 
+                   apply_log2=True, apply_normalize=True):
     """
-    One-hot encode labels.
+    Complete preprocessing pipeline.
     
     Args:
-        y_train, y_valid, y_test: Label vectors.
+        input_file: Path to input CSV file
+        output_dir: Directory to save processed data
+        variance_threshold: Variance threshold for feature filtering.
+                           Can be numeric value or "mean" to use mean variance
+        apply_log2: Whether to apply log2 transformation
+        apply_normalize: Whether to apply z-score normalization
         
     Returns:
-        tuple: (y_train_onehot, y_valid_onehot, y_test_onehot, encoder) encoded labels and encoder.
+        dict: Preprocessed data and metadata
     """
-    encoder = OneHotEncoder(sparse_output=False)
-    y_train_onehot = encoder.fit_transform(y_train.values.reshape(-1, 1))
-    y_valid_onehot = encoder.transform(y_valid.values.reshape(-1, 1))
-    y_test_onehot = encoder.transform(y_test.values.reshape(-1, 1))
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     
-    return y_train_onehot, y_valid_onehot, y_test_onehot, encoder
+    # Load data
+    expression_data, target_labels, gene_names, sample_names = load_data_with_target(input_file)
+    
+    # Log2 transformation
+    if apply_log2:
+        expression_data = apply_log2_transform(expression_data)
+    else:
+        print("\n[Skipping] Log2 transformation")
+    
+    # Variance filtering
+    expression_data, selected_features = apply_variance_filter(expression_data, variance_threshold)
+    selected_gene_names = gene_names[selected_features]
+    
+    # Z-score normalization
+    if apply_normalize:
+        expression_data, scaler = apply_zscore_normalize(expression_data)
+    else:
+        scaler = None
+        print("\n[Skipping] Z-score normalization")
+    
+    # Save results
+    output_base = Path(input_file).stem
+    np.save(output_dir / f'{output_base}_processed.npy', expression_data)
+    with open(output_dir / f'{output_base}_targets.pkl', 'wb') as f:
+        pickle.dump({
+            'target_labels': target_labels,
+            'gene_names': selected_gene_names.tolist(),
+            'sample_names': sample_names.tolist(),
+            'selected_features': selected_features
+        }, f)
+    
+    print(f"\n[Saving] Processed data to {output_dir}/")
+    print(f"    Expression matrix: {output_base}_processed.npy ({expression_data.shape})")
+    print(f"    Metadata: {output_base}_targets.pkl")
+    
+    return {
+        'expression_data': expression_data,
+        'target_labels': target_labels,
+        'gene_names': selected_gene_names,
+        'sample_names': sample_names,
+        'scaler': scaler,
+        'selected_features': selected_features
+    }
+
+
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Preprocess gene expression data')
+    parser.add_argument('--input', type=str, required=True, help='Input CSV file path')
+    parser.add_argument('--output_dir', type=str, default='data/processed', help='Output directory')
+    parser.add_argument('--variance_threshold', type=str, default='mean', 
+                       help='Variance threshold (numeric value or "mean" to use mean variance)')
+    parser.add_argument('--no_log2', action='store_true', help='Skip log2 transformation')
+    parser.add_argument('--no_normalize', action='store_true', help='Skip z-score normalization')
+    
+    args = parser.parse_args()
+    
+    preprocess_data(
+        args.input,
+        args.output_dir,
+        variance_threshold=args.variance_threshold,
+        apply_log2=not args.no_log2,
+        apply_normalize=not args.no_normalize
+    )
 

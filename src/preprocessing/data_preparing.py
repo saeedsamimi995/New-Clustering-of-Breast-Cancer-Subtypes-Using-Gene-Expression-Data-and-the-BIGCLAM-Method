@@ -262,8 +262,8 @@ if __name__ == "__main__":
     parser.add_argument(
         '--config',
         type=str,
-        default='config/config.yaml',
-        help='Path to configuration file (default: config/config.yaml)'
+        default='config/config.yml',
+        help='Path to configuration file (default: config/config.yml)'
     )
     parser.add_argument(
         '--dataset', 
@@ -277,7 +277,7 @@ if __name__ == "__main__":
     # Load configuration
     if not os.path.exists(args.config):
         print(f"Error: Configuration file not found: {args.config}")
-        print("Please create a configuration file or use the default: config/config.yaml")
+        print("Please create a configuration file or use the default: config/config.yml")
         sys.exit(1)
     
     config = load_config(args.config)

@@ -56,18 +56,24 @@ class BIGCLAM:
     
     def train(self, A, max_communities=10, iterations=100, lr=0.08):
         """
-        Train BIGCLAM model to find optimal number of communities.
+        Train BIGCLAM model to automatically find optimal number of communities using AIC.
+        
+        The model tests communities from 1 to max_communities and automatically selects
+        the optimal number based on Akaike Information Criterion (AIC). Lower AIC indicates
+        better model fit with penalty for complexity.
+        
         Memory-efficient version supporting sparse matrices.
         
         Args:
             A (np.ndarray, scipy.sparse matrix, or torch.Tensor): Adjacency matrix (N x N).
-            max_communities (int): Maximum number of communities to try.
+            max_communities (int): Maximum number of communities to test (searches 1 to this value).
             iterations (int): Number of optimization iterations per community number.
-            lr (float): Learning rate for optimizer.
+            lr (float): Learning rate for Adam optimizer.
             
         Returns:
-            tuple: (best_F, best_num_communities) where best_F is the membership 
-                   strength matrix and best_num_communities is the optimal number of communities.
+            tuple: (best_F, best_num_communities) where:
+                - best_F: Membership strength matrix (N x optimal_C) for optimal number of communities
+                - best_num_communities: Automatically determined optimal number of communities (via AIC)
         """
         # Convert sparse matrix to dense if needed (memory efficient for PyTorch)
         if issparse(A):
@@ -85,6 +91,10 @@ class BIGCLAM:
         best_F = None
         best_num_communities = 1
         best_aic = float('inf')
+        
+        print(f"\n[Searching optimal communities] Testing 1 to {max_communities} communities...")
+        print(f"Using AIC (Akaike Information Criterion) for model selection")
+        print(f"(Lower AIC = better fit with complexity penalty)\n")
         
         for num_communities in range(1, max_communities + 1):
             # Initialize membership strength matrix
@@ -106,18 +116,21 @@ class BIGCLAM:
             k = N * num_communities  # Number of parameters
             aic = -2 * ll.item() + 2 * k
             
-            if aic < best_aic:
+            is_best = aic < best_aic
+            if is_best:
                 best_aic = aic
                 best_F = F.detach().cpu().numpy()
                 best_num_communities = num_communities
             
-            print(f'At step {num_communities}/{max_communities}, AIC: {aic:.4f}')
+            status = "★ BEST" if is_best else ""
+            print(f'  Communities={num_communities:2d}/{max_communities}, AIC: {aic:.4f} {status}')
             
             # Clean up GPU memory
             if self.device.type == 'cuda':
                 torch.cuda.empty_cache()
         
-        print(f"Best number of communities: {best_num_communities} (AIC: {best_aic:.4f})")
+        print(f"\n[Optimal Result] Best number of communities: {best_num_communities} (AIC: {best_aic:.4f})")
+        print(f"This value was automatically selected based on AIC model selection.")
         return best_F, best_num_communities
     
     def visualize_bipartite(self, F, p2c=None, save_path=None):
@@ -161,17 +174,22 @@ class BIGCLAM:
 
 def train_bigclam(A, max_communities=10, iterations=100, lr=0.08, device=None):
     """
-    Convenience function to train BIGCLAM model.
+    Convenience function to train BIGCLAM model with automatic community selection.
+    
+    Automatically finds optimal number of communities using AIC by testing
+    all values from 1 to max_communities and selecting the best.
     
     Args:
-        A (np.ndarray or torch.Tensor): Adjacency matrix.
-        max_communities (int): Maximum number of communities to try.
-        iterations (int): Number of optimization iterations.
-        lr (float): Learning rate.
-        device (torch.device, optional): Device to use.
+        A (np.ndarray or torch.Tensor): Adjacency matrix (N x N).
+        max_communities (int): Maximum number of communities to test (searches 1 to this value).
+        iterations (int): Number of optimization iterations per community number.
+        lr (float): Learning rate for Adam optimizer.
+        device (torch.device, optional): Device to use (GPU if available, else CPU).
         
     Returns:
-        tuple: (best_F, best_num_communities) membership matrix and optimal communities.
+        tuple: (best_F, best_num_communities) where:
+            - best_F: Membership strength matrix for optimal number of communities
+            - best_num_communities: Automatically determined optimal number (via AIC)
     """
     model = BIGCLAM(device=device)
     return model.train(A, max_communities, iterations, lr)
