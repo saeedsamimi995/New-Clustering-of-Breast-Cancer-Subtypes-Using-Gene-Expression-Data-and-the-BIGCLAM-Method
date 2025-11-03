@@ -39,32 +39,35 @@ This project implements a modular pipeline for clustering breast cancer subtypes
 
 ## Pipeline Structure
 
-The pipeline consists of **9 modular Python modules** organized in `src/`:
+The pipeline consists of **8 modular Python modules** organized in `src/`:
+
+**Note**: This pipeline expects prepared CSV files (`*_target_added.csv`) to already exist.
+Data preparation is a separate step (see [Data Preparation](#data-preparation) below).
 
 ```
 BIGCLAM/
 ├── run_all.py                  # Main orchestration script
 ├── src/
-│   ├── preprocessing/          # Steps 1-2: Data preparation & preprocessing
-│   │   ├── data_preparing.py
+│   ├── preprocessing/          # Step 1: Data preprocessing
 │   │   └── data_preprocessing.py
-│   ├── graph/                  # Step 3: Graph construction
+│   ├── graph/                  # Step 2: Graph construction
 │   │   └── graph_construction.py
-│   ├── clustering/             # Step 4: BIGCLAM clustering
+│   ├── clustering/             # Step 3: BIGCLAM clustering
 │   │   └── clustering.py
 │   ├── bigclam/                # BIGCLAM model
 │   │   └── bigclam_model.py
-│   ├── evaluation/             # Step 5: Evaluation metrics
+│   ├── evaluation/             # Step 4: Evaluation metrics
 │   │   └── evaluators.py
-│   ├── visualization/          # Step 6: Visualizations
+│   ├── visualization/          # Step 5: Visualizations
 │   │   └── visualizers.py
-│   ├── classifiers/            # Step 7: Classification validation
+│   ├── classifiers/            # Step 6: Classification validation
 │   │   ├── classifiers.py
 │   │   └── mlp_classifier.py
-│   ├── interpretation/         # Step 8: Result interpretation
+│   ├── interpretation/         # Step 7: Result interpretation
 │   │   └── interpreters.py
-│   └── analysis/               # Step 9: Cross-dataset analysis
-│       └── cross_dataset_analysis.py
+│   └── analysis/               # Step 8: Cross-dataset analysis & grid search
+│       ├── cross_dataset_analysis.py
+│       └── parameter_grid_search.py  # Parameter optimization
 └── config/
     └── config.yml             # Configuration parameters
 ```
@@ -96,18 +99,32 @@ pip install umap-learn
 
 ## Quick Start
 
-### Complete Pipeline (Recommended)
+### Data Preparation (One-Time Setup)
+
+**Note**: This pipeline expects prepared CSV files (`*_target_added.csv`) to already exist.
+If you need to prepare data from raw files, run this separately:
 
 ```bash
 # Activate virtual environment (if using one)
 source venv/bin/activate
 
-# Run all steps
+# Prepare data from raw files (one-time setup)
+python -m src.preprocessing.data_preparing --config config/config.yml --dataset both
+```
+
+This creates:
+- `data/tcga_brca_data_target_added.csv`
+- `data/gse96058_data_target_added.csv`
+
+### Complete Pipeline (Recommended)
+
+```bash
+# Run all steps (expects prepared CSV files to exist)
 python run_all.py --config config/config.yml
 ```
 
-That's it! The pipeline will:
-1. Preprocess TCGA-BRCA and GSE96058
+The pipeline will:
+1. Preprocess TCGA-BRCA and GSE96058 (from prepared CSV files)
 2. Build similarity graphs
 3. Apply BIGCLAM clustering
 4. Evaluate against PAM50/Oncotree labels
@@ -115,11 +132,30 @@ That's it! The pipeline will:
 6. Validate with MLP/SVM
 7. Analyze cross-dataset consistency
 
+### Parameter Grid Search
+
+Test different variance and similarity thresholds to find optimal parameters:
+
+```bash
+# Run grid search for both datasets
+python run_all.py --steps grid_search
+
+# This will:
+# - Auto-generate parameter ranges from start/end/step in config.yml
+#   (e.g., variance: 0.5-15.0 step 0.5 = 30 values, similarity: 0.1-0.9 step 0.05 = 17 values)
+# - Test all combinations (510 per dataset: 30 × 17)
+# - Run full pipeline for each combination
+# - Generate paper-ready visualizations
+# - Recommend best configuration
+```
+
+Results are saved to `results/grid_search/` with PNG visualizations.
+
 ### Run Specific Steps
 
 ```bash
 # Run only preprocessing and graph construction
-python run_all.py --steps prepare preprocess graph
+python run_all.py --steps preprocess graph
 
 # Run evaluation and visualization
 python run_all.py --steps evaluate visualize
@@ -149,59 +185,70 @@ After running, check:
 
 ## Module Details
 
-### 1. `src/preprocessing/data_preparing.py`
+### Data Preparation (Separate Step)
+
+`src/preprocessing/data_preparing.py` is run separately to prepare data from raw files:
 - Loads raw TCGA BRCA and GSE96058 datasets
 - Adds target labels (Oncotree for TCGA, PAM50 for GSE)
 - Matches clinical and expression data
 - Exports to `*_target_added.csv` format
 
-### 2. `src/preprocessing/data_preprocessing.py`
+**Note**: This step is separate from the main pipeline. The prepared CSV files should already exist in the repository.
+
+### 1. `src/preprocessing/data_preprocessing.py`
 - **Log2 transformation**: Handles zeros with `log2(x+1)`
 - **Variance filtering**: Removes low-variance genes (uses mean variance by default)
 - **Z-score normalization**: Across samples
 - Outputs: `*_processed.npy` and `*_targets.pkl`
 
-### 3. `src/graph/graph_construction.py`
+### 2. `src/graph/graph_construction.py`
 - **Cosine similarity**: Between samples
 - **Threshold filtering**: Edges for similarity > 0.4
 - **Sparse matrices**: Memory-efficient for large datasets
 - Outputs: `*_adjacency.npz` graphs
 
-### 4. `src/clustering/clustering.py`
+### 3. `src/clustering/clustering.py`
 - **BIGCLAM**: Overlapping community detection
-- **AIC model selection**: Automatically finds optimal number of communities (tests 1 to max_communities)
+- **BIC model selection**: Automatically finds optimal number of communities (tests 1 to max_communities)
 - **GPU acceleration**: PyTorch implementation
 - Outputs: `*_communities.npy` and `*_membership.npy`
 
-### 5. `src/evaluation/evaluators.py`
+### 4. `src/evaluation/evaluators.py`
 - **Metrics**: ARI, NMI, Purity, F1-score (macro)
 - **Confusion matrices**: Cluster vs. label distributions
 - **Per-cluster statistics**: Dominant labels and diversity
 - Outputs: `*_confusion_matrix.png`, `*_cluster_distribution.png`
 
-### 6. `src/visualization/visualizers.py`
+### 5. `src/visualization/visualizers.py`
 - **t-SNE plots**: Colored by clusters vs. labels
 - **UMAP plots**: Alternative dimensionality reduction
 - **Membership heatmaps**: Community affinity by label
 - Outputs: `*_tsne.png`, `*_umap.png`, `*_membership_heatmap.png`
 
-### 7. `src/classifiers/classifiers.py`
+### 6. `src/classifiers/classifiers.py`
 - **MLP**: Multi-layer perceptron with early stopping
 - **SVM**: RBF kernel with probability estimates
 - **Validation**: Predicts labels from community assignments
 - Outputs: Classification accuracy, confusion matrices, ROC curves
 
-### 8. `src/interpretation/interpreters.py`
+### 7. `src/interpretation/interpreters.py`
 - **Result interpretation**: Based on ARI/NMI thresholds
 - **Overlap analysis**: Mixed subtypes and diversity
 - **Border samples**: High membership in multiple communities
 - Biological insights and explanations
 
-### 9. `src/analysis/cross_dataset_analysis.py`
+### 8. `src/analysis/cross_dataset_analysis.py`
 - **Centroid computation**: Mean expression per community
 - **Correlation analysis**: Between TCGA and GSE communities
 - **Matching**: Find corresponding clusters across datasets
 - Outputs: Correlation heatmaps, dendrograms
+
+### 9. `src/analysis/parameter_grid_search.py` (New!)
+- **Grid search**: Automatically generates parameter ranges from start/end/step in config.yml
+- **Full pipeline evaluation**: Runs preprocessing → graph → cluster → evaluate for each combination (510 per dataset by default)
+- **Paper-ready visualizations**: Generates high-resolution PNG heatmaps and plots
+- **Automated recommendations**: Identifies best parameter configuration based on composite scoring
+- Outputs: `results/grid_search/*.png` visualizations and CSV results
 
 ## Expected Results
 
@@ -242,11 +289,33 @@ Edit `config/config.yml`:
 
 ```yaml
 preprocessing:
-  variance_threshold: "mean"  # Use mean variance as threshold, or numeric value for fixed threshold
-  similarity_threshold: 0.4   # Graph edge threshold
+  variance_thresholds:
+    tcga_brca_data: "percentile_75"  # Dataset-specific variance thresholds
+    gse96058_data: "percentile_75"
+    default: "mean"
+  similarity_thresholds:
+    tcga_brca_data: 0.2  # Dataset-specific similarity thresholds
+    gse96058_data: 0.6
+    default: 0.4
+
+grid_search:  # Parameter grid search ranges (auto-generated from start/end/step)
+  tcga:
+    variance_start: 0.5
+    variance_end: 15.0
+    variance_step: 0.5
+    similarity_start: 0.1
+    similarity_end: 0.9
+    similarity_step: 0.05
+  gse96058:
+    variance_start: 0.5
+    variance_end: 15.0
+    variance_step: 0.5
+    similarity_start: 0.1
+    similarity_end: 0.9
+    similarity_step: 0.05
 
 bigclam:
-  max_communities: 10          # Maximum communities to search (optimal found automatically via AIC)
+  max_communities: 10          # Maximum communities to search (optimal found automatically via BIC)
   iterations: 100              # Optimization iterations per community number
   learning_rate: 0.08          # Adam optimizer learning rate
 
@@ -262,7 +331,31 @@ classifiers:
 
 ### Parameter Selection Guide
 
-**Finding optimal thresholds**: Use the sensitivity analysis script to determine the best `variance_threshold` and `similarity_threshold` values:
+**Method 1: Grid Search (Recommended for Papers)**
+
+Use the grid search to test multiple parameter combinations and generate paper-ready visualizations:
+
+```bash
+# Run grid search (tests all combinations from config)
+python run_all.py --steps grid_search
+```
+
+**What it does:**
+- Automatically generates parameter ranges from start/end/step values in config (e.g., variance: 0.5 to 15.0 step 0.5 = 30 values, similarity: 0.1 to 0.9 step 0.05 = 17 values)
+- Tests all combinations of variance and similarity thresholds (total: 510 combinations per dataset)
+- Runs full pipeline (preprocess → graph → cluster → evaluate) for each combination
+- Generates comprehensive heatmaps and line plots
+- Recommends best configuration based on ARI, NMI, Purity, and F1 scores
+- Creates paper-ready PNG visualizations (300 DPI)
+
+Results saved to `results/grid_search/`:
+- `{dataset}_parameter_grid_search.png` - Comprehensive visualization
+- `{dataset}_{metric}_heatmap.png` - Individual metric heatmaps
+- `{dataset}_grid_search_results.csv` - Full results table
+
+**Method 2: Sensitivity Analysis**
+
+Use the sensitivity analysis script for detailed threshold analysis:
 
 ```bash
 # Run sensitivity analysis (auto-detects processed data)
@@ -310,6 +403,11 @@ results/
 ├── classification/
 │   ├── svm_confusion_matrix.png
 │   └── mlp_confusion_matrix.png
+├── grid_search/              # Parameter optimization results (NEW!)
+│   ├── *_parameter_grid_search.png
+│   ├── *_ari_heatmap.png
+│   ├── *_nmi_heatmap.png
+│   └── *_grid_search_results.csv
 └── cross_dataset/
     ├── community_correlations.png
     └── community_dendrogram.png

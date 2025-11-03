@@ -2,14 +2,14 @@
 
 # Data paths
 data:
-  input_file: "data/gene_expression_data_target_added.csv"
-  output_file: "data/reduced_data_BC_label.csv"
+  input_file: "data/gse96058_data_target_added.csv"
+  output_file: "data/gse96058_reduced_data.csv"
   save_path: "data/BIGCLAM_data/"
   
 # Dataset preparation paths
 dataset_preparation:
   tcga:
-    clinical: "data/brca_tcga_clinical_data.tsv"
+    clinical: "data/brca_tcga_pub_clinical_data.tsv"
     expression: "data/Human__TCGA_BRCA__UNC__RNAseq__HiSeq_RNA__01_28_2016__BI__Gene__Firehose_RSEM_log2.cct.gz"
     output: "data/tcga_brca_data_target_added.csv"
   gse96058:
@@ -19,17 +19,36 @@ dataset_preparation:
   
 # Preprocessing parameters
 preprocessing:
-  variance_threshold: "mean"  # Use "mean" to filter by mean variance, or numeric value for fixed threshold
-  similarity_threshold: 0.4
   chunk_size: null  # Auto-detect: use 10000 for files >500MB, null for smaller files
+  
+  # Dataset-specific variance thresholds for feature selection
+  # Based on sensitivity analysis: more aggressive filtering = fewer features = better clustering
+  # Options: "mean", "median", "percentile_X" (keeps top (100-X)%), "top_X" (keeps exactly X features)
+  variance_thresholds:
+    # Sensitivity analysis recommended ~11-15% retention for better community detection
+    tcga_brca_data: "percentile_85"  # TCGA-BRCA: Keep top 15% most variable (aggressive, helps find 4-5 communities)
+    gse96058_data: "percentile_85"   # GSE96058: Keep top 15% most variable (based on sensitivity analysis: 11.4% retention)
+    default: "mean"  # Fallback: use mean variance if dataset not specified
+  
+  # Note: "percentile_85" keeps top 15% of features (vs "mean" which keeps ~30-50%)
+  # This aggressive filtering focuses on most discriminative features, improving BIGCLAM clustering
+  
+  # Dataset-specific similarity thresholds (optimized via sensitivity analysis)
+  # These ensure fully connected graphs (required for BIGCLAM) with optimal density
+  similarity_thresholds:
+    tcga_brca_data: 0.2  # TCGA-BRCA: 11.76% density, fully connected (1 component)
+    gse96058_data: 0.6  # GSE96058: 90.63% density, fully connected (1 component)
+    # Default fallback if dataset not specified
+    default: 0.4
   
 # BIGCLAM parameters
 bigclam:
-  max_communities: 10  # Maximum communities to search (model finds optimal using AIC)
+  max_communities: 10  # Maximum communities to search (model finds optimal using BIC)
   iterations: 100  # Optimization iterations per community number
   learning_rate: 0.08  # Adam optimizer learning rate
-  # Note: Optimal number of communities is automatically determined using AIC
+  # Note: Optimal number of communities is automatically determined using BIC
   # The model tests 1 to max_communities and selects the best
+  # BIC uses stronger penalty than AIC, better for community detection
   
 # Classifier parameters
 classifiers:
@@ -66,4 +85,25 @@ output:
   results_dir: "results/"
   models_dir: "models/"
   visualizations_dir: "results/"
+
+# Grid search parameters (for parameter optimization)
+# Ranges are generated automatically from start, end, and step values
+# Variance: 0.5 to 15 (step 0.5) = 30 values
+# Similarity: 0.1 to 0.9 (step 0.05) = 17 values
+# Total combinations: 30 × 17 = 510 per dataset
+grid_search:
+  tcga:
+    variance_start: 0.5
+    variance_end: 15.0
+    variance_step: 0.5
+    similarity_start: 0.1
+    similarity_end: 0.9
+    similarity_step: 0.05
+  gse96058:
+    variance_start: 0.5
+    variance_end: 15.0
+    variance_step: 0.5
+    similarity_start: 0.1
+    similarity_end: 0.9
+    similarity_step: 0.05
 

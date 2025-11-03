@@ -92,6 +92,9 @@ def apply_variance_filter(data, threshold="mean"):
         threshold: variance threshold. Can be:
                    - numeric value: use as fixed threshold
                    - "mean": use mean variance of all features as threshold
+                   - "median": use median variance as threshold
+                   - "percentile_X": use Xth percentile as threshold (e.g., "percentile_75" keeps top 25%)
+                   - "top_X": keep top X most variable features (e.g., "top_2000")
         
     Returns:
         tuple: (filtered_data, selected_feature_indices)
@@ -101,42 +104,112 @@ def apply_variance_filter(data, threshold="mean"):
         print(f"    [WARNING] Found NaN/Inf in data, cleaning...")
         data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
     
-    # Calculate threshold if "mean" is specified
-    if isinstance(threshold, str) and threshold.lower() == "mean":
-        # Calculate variance for each feature (axis=0 means across samples)
-        feature_variances = np.var(data, axis=0)
-        
-        # Remove NaN variances (from constant features or invalid data)
-        valid_variances = feature_variances[np.isfinite(feature_variances)]
-        
-        if len(valid_variances) == 0:
-            print(f"    [ERROR] No valid variances found! Using default threshold of 0.01...")
-            threshold_value = 0.01
-        else:
-            threshold_value = np.mean(valid_variances)
+    # Calculate variance for each feature (axis=0 means across samples)
+    feature_variances = np.var(data, axis=0)
+    
+    # Remove NaN variances (from constant features or invalid data)
+    valid_variances = feature_variances[np.isfinite(feature_variances)]
+    
+    if len(valid_variances) == 0:
+        print(f"    [ERROR] No valid variances found! Using default threshold of 0.01...")
+        threshold_value = 0.01
+        var_threshold = VarianceThreshold(threshold=threshold_value)
+        data_filtered = var_threshold.fit_transform(data)
+        selected_features = var_threshold.get_support()
+    else:
+        # Handle different threshold types
+        if isinstance(threshold, str):
+            threshold_lower = threshold.lower()
             
-            if not np.isfinite(threshold_value) or threshold_value < 0:
-                print(f"    [WARNING] Mean variance is invalid ({threshold_value}), using median instead...")
+            if threshold_lower == "mean":
+                threshold_value = np.mean(valid_variances)
+                if not np.isfinite(threshold_value) or threshold_value < 0:
+                    print(f"    [WARNING] Mean variance is invalid, using median instead...")
+                    threshold_value = np.median(valid_variances)
+                print(f"\n[Variance Filter] Using mean variance as threshold...")
+                print(f"    Mean variance: {threshold_value:.4f}")
+                var_threshold = VarianceThreshold(threshold=threshold_value)
+                data_filtered = var_threshold.fit_transform(data)
+                selected_features = var_threshold.get_support()
+                
+            elif threshold_lower == "median":
                 threshold_value = np.median(valid_variances)
                 if not np.isfinite(threshold_value) or threshold_value < 0:
-                    print(f"    [WARNING] Median variance also invalid, using default 0.01...")
                     threshold_value = 0.01
-        
-        print(f"\n[Variance Filter] Using mean variance as threshold...")
-        print(f"    Mean variance: {threshold_value:.4f}")
-        print(f"    Valid features: {len(valid_variances)}/{len(feature_variances)}")
-    else:
-        threshold_value = float(threshold)
-        print(f"\n[Variance Filter] Threshold={threshold_value}...")
+                print(f"\n[Variance Filter] Using median variance as threshold...")
+                print(f"    Median variance: {threshold_value:.4f}")
+                var_threshold = VarianceThreshold(threshold=threshold_value)
+                data_filtered = var_threshold.fit_transform(data)
+                selected_features = var_threshold.get_support()
+                
+            elif threshold_lower.startswith("percentile_"):
+                # Extract percentile value (e.g., "percentile_75" -> 75)
+                try:
+                    percentile = float(threshold_lower.split("_")[1])
+                    threshold_value = np.percentile(valid_variances, percentile)
+                    print(f"\n[Variance Filter] Using {percentile}th percentile as threshold...")
+                    print(f"    Percentile threshold: {threshold_value:.4f}")
+                    print(f"    (Keeps top {100-percentile:.1f}% most variable features)")
+                    var_threshold = VarianceThreshold(threshold=threshold_value)
+                    data_filtered = var_threshold.fit_transform(data)
+                    selected_features = var_threshold.get_support()
+                except (IndexError, ValueError):
+                    print(f"    [ERROR] Invalid percentile format. Use 'percentile_X' (e.g., 'percentile_75')")
+                    threshold_value = np.mean(valid_variances)
+                    var_threshold = VarianceThreshold(threshold=threshold_value)
+                    data_filtered = var_threshold.fit_transform(data)
+                    selected_features = var_threshold.get_support()
+                    
+            elif threshold_lower.startswith("top_"):
+                # Extract number of features (e.g., "top_2000" -> 2000)
+                try:
+                    n_top = int(threshold_lower.split("_")[1])
+                    # Select top N features by variance
+                    top_indices = np.argsort(feature_variances)[::-1][:n_top]
+                    selected_features = np.zeros(len(feature_variances), dtype=bool)
+                    selected_features[top_indices] = True
+                    data_filtered = data[:, selected_features]
+                    print(f"\n[Variance Filter] Keeping top {n_top} most variable features...")
+                except (IndexError, ValueError):
+                    print(f"    [ERROR] Invalid top format. Use 'top_X' (e.g., 'top_2000')")
+                    threshold_value = np.mean(valid_variances)
+                    var_threshold = VarianceThreshold(threshold=threshold_value)
+                    data_filtered = var_threshold.fit_transform(data)
+                    selected_features = var_threshold.get_support()
+            else:
+                # Try to parse as float
+                try:
+                    threshold_value = float(threshold)
+                    print(f"\n[Variance Filter] Threshold={threshold_value}...")
+                    var_threshold = VarianceThreshold(threshold=threshold_value)
+                    data_filtered = var_threshold.fit_transform(data)
+                    selected_features = var_threshold.get_support()
+                except ValueError:
+                    print(f"    [ERROR] Invalid threshold format: {threshold}")
+                    print(f"    Using mean variance as fallback...")
+                    threshold_value = np.mean(valid_variances)
+                    var_threshold = VarianceThreshold(threshold=threshold_value)
+                    data_filtered = var_threshold.fit_transform(data)
+                    selected_features = var_threshold.get_support()
+        else:
+            # Numeric threshold
+            threshold_value = float(threshold)
+            print(f"\n[Variance Filter] Threshold={threshold_value}...")
+            var_threshold = VarianceThreshold(threshold=threshold_value)
+            data_filtered = var_threshold.fit_transform(data)
+            selected_features = var_threshold.get_support()
     
-    var_threshold = VarianceThreshold(threshold=threshold_value)
-    data_filtered = var_threshold.fit_transform(data)
-    selected_features = var_threshold.get_support()
-    n_kept = selected_features.sum()
-    n_total = len(selected_features)
+    n_kept = np.sum(selected_features) if isinstance(selected_features, np.ndarray) else len(selected_features)
+    n_total = len(feature_variances)
     print(f"    Kept {n_kept:,}/{n_total:,} features ({n_kept/n_total*100:.1f}%)")
     
-    return data_filtered, np.where(selected_features)[0]
+    # Convert boolean array to indices if needed
+    if isinstance(selected_features, np.ndarray) and selected_features.dtype == bool:
+        feature_indices = np.where(selected_features)[0]
+    else:
+        feature_indices = selected_features
+    
+    return data_filtered, feature_indices
 
 
 def apply_log2_transform(data):
@@ -150,7 +223,9 @@ def apply_log2_transform(data):
         data: numpy array (must be numeric)
         
     Returns:
-        numpy array: log2-transformed data (or original if already transformed)
+        tuple: (transformed_data, is_already_normalized)
+               - transformed_data: numpy array (log2-transformed or original if already transformed)
+               - is_already_normalized: bool indicating if data appears already z-score normalized
     """
     print("\n[Log2 Transform]...")
     
@@ -193,48 +268,94 @@ def apply_log2_transform(data):
     data_mean = np.abs(data_mean_raw)  # Use absolute mean to check magnitude
     data_std = np.nanstd(data)
     total_values = len(data.flatten())
+    negative_percentage = (negative_count / total_values) * 100 if total_values > 0 else 0
+    
+    # CRITICAL: If data has ANY negatives, it's almost certainly already processed
+    # (normalized or log-space with negatives). Raw expression counts cannot be negative.
+    # Only exception: measurement errors, but those should be rare.
+    has_any_negatives = negative_count > 0
     
     # Multiple indicators that data is already processed (log-transformed and/or normalized):
-    indicator_1 = data_range < 25  # Small range typical of log-space or normalized
-    indicator_2 = data_max < 20     # Max value reasonable for log-space
-    indicator_3 = data_mean < 15    # Mean reasonable for log-space (or near 0 if normalized)
-    indicator_4 = negative_count > total_values * 0.05  # Many negatives (normalized data)
-    indicator_5 = (data_mean < 2) and (data_std < 5)  # Near zero mean, small std = z-score normalized
+    # Log-transformed data typically:
+    # - Has small max value (< 20 for log2 space, though can be up to ~25 for some datasets)
+    # - Has mean in log-space (typically 2-15 for log2-transformed counts)
+    # - Has moderate range (typically 0-20, but can be larger with outliers)
+    # Normalized data typically:
+    # - Has negatives (~50% of values negative if z-score normalized)
+    # - Has mean near 0, std near 1 (if already normalized)
+    # - Has values in range roughly -3 to +3 (z-score normalized)
     
-    # Check 1: Has negatives + small range = definitely processed (normalized log-space)
-    has_negatives_and_small_range = (negative_count > 0) and (data_range < 25)
+    indicator_small_max = data_max < 25     # Max value reasonable for log-space
+    indicator_small_mean = data_mean < 20   # Mean reasonable for log-space
+    indicator_small_range = data_range < 30 # Range reasonable for log-space (allowing outliers)
+    indicator_many_negatives = negative_percentage > 1.0  # More than 1% negatives = likely normalized
+    indicator_normalized_stats = (data_mean < 3) and (data_std < 6)  # Characteristics of normalized data
     
-    # Check 2: Z-score normalized characteristics (mean ≈ 0, std ≈ 1, can have negatives)
+    # Check 1: Has negatives = DEFINITELY already processed (raw counts can't be negative)
+    # If there are negatives AND max value is reasonable (< 30), it's processed
+    # Even if range is large, negatives alone are a strong indicator
+    has_negatives_processed = has_any_negatives and (data_max < 30)
+    
+    # Check 2: Many negatives (>1%) + reasonable max = normalized/processed data
+    has_many_negatives = indicator_many_negatives and (data_max < 30)
+    
+    # Check 3: Z-score normalized characteristics (mean ≈ 0, std ≈ 1, has negatives)
     looks_zscore_normalized = (
-        indicator_5 and 
-        negative_count > 0 and
-        data_range < 15  # Normalized data has smaller range
+        indicator_normalized_stats and 
+        has_any_negatives and
+        data_range < 20  # Normalized data typically has smaller range
     )
     
-    # Check 3: No negatives but looks like log-space (positive log-transformed values)
+    # Check 4: No negatives but looks like log-space (positive log-transformed values)
+    # TCGA-BRCA RSEM data is typically log2-transformed: values in 0-20 range, mean 2-15
     no_negatives_but_log_space = (
         negative_count == 0 and 
-        indicator_1 and 
-        indicator_2 and 
-        indicator_3
+        indicator_small_max and 
+        indicator_small_mean and
+        indicator_small_range
     )
     
-    is_likely_log_transformed = has_negatives_and_small_range or looks_zscore_normalized or no_negatives_but_log_space
+    # Check 5: Very small max (< 10) with small mean (< 10) = likely already log2-transformed
+    # This catches datasets where log2 was applied but data is compact
+    very_small_values = (data_max < 10) and (data_mean < 10) and (negative_count == 0)
+    
+    is_likely_log_transformed = (
+        has_negatives_processed or 
+        has_many_negatives or 
+        looks_zscore_normalized or 
+        no_negatives_but_log_space or
+        very_small_values
+    )
     
     if is_likely_log_transformed:
         print(f"    [SKIP] Data appears already processed (log-transformed and/or normalized):")
-        print(f"             - Range: [{data_min:.2f}, {data_max:.2f}] (typical for processed data: < 25)")
+        print(f"             - Range: [{data_min:.2f}, {data_max:.2f}]")
         print(f"             - Mean: {np.nanmean(data):.2f}, Std: {data_std:.2f}")
         
+        # Identify which check triggered detection
+        detection_reason = []
+        if has_negatives_processed:
+            detection_reason.append("has negatives (raw counts cannot be negative)")
+        if has_many_negatives and not has_negatives_processed:
+            detection_reason.append(f"has {negative_percentage:.1f}% negatives (likely normalized)")
         if looks_zscore_normalized:
-            print(f"             - Characteristics: Z-score normalized (mean ≈ 0, std ≈ 1)")
-            print(f"             - Has {negative_count} negative values ({negative_count/total_values*100:.1f}%)")
+            detection_reason.append("z-score normalized characteristics (mean ≈ 0, std ≈ 1)")
+        if very_small_values:
+            detection_reason.append("very small values (max < 10, likely already log2-transformed)")
+        if no_negatives_but_log_space and not very_small_values:
+            detection_reason.append("log-space characteristics (small range, mean, max)")
+        
+        if detection_reason:
+            print(f"             - Detection reason: {', '.join(detection_reason)}")
+        
+        if looks_zscore_normalized:
+            print(f"             - Has {negative_count} negative values ({negative_percentage:.1f}%)")
             print(f"               This is expected for normalized data (~50% should be negative)")
         elif negative_count > 0:
-            print(f"             - Has {negative_count} negative values ({negative_count/total_values*100:.1f}%)")
+            print(f"             - Has {negative_count} negative values ({negative_percentage:.1f}%)")
             print(f"               (Likely normalized after log transformation)")
         else:
-            print(f"             - No negatives (all values positive, typical for log2(RSEM))")
+            print(f"             - No negatives (all values positive, typical for log2-transformed data like TCGA-BRCA)")
         
         print(f"             - Skipping log2 transformation to avoid double transformation")
         print(f"             - Only cleaning invalid values (NaN/Inf)")
@@ -243,7 +364,15 @@ def apply_log2_transform(data):
         # Preserve negatives - they're valid in normalized/log-space
         data_cleaned = np.nan_to_num(data, nan=0.0, posinf=data_max, neginf=data_min)
         print(f"    Final values: min={data_cleaned.min():.2f}, max={data_cleaned.max():.2f}, mean={data_cleaned.mean():.2f}")
-        return data_cleaned
+        
+        # Determine if data is already z-score normalized
+        # Check if it has normalized characteristics (mean ≈ 0, std ≈ 1-3, has negatives)
+        is_normalized = (
+            looks_zscore_normalized or 
+            (has_any_negatives and indicator_normalized_stats) or
+            (has_any_negatives and (data_mean < 1) and (data_std < 5))
+        )
+        return data_cleaned, is_normalized
     
     # Data appears to be raw counts - proceed with log2 transformation
     if negative_count > 0:
@@ -264,7 +393,7 @@ def apply_log2_transform(data):
         data_transformed = np.nan_to_num(data_transformed, nan=0.0, posinf=50.0, neginf=0.0)
     
     print(f"    Values: min={data_transformed.min():.2f}, max={data_transformed.max():.2f}, mean={data_transformed.mean():.2f}")
-    return data_transformed
+    return data_transformed, False  # Raw data is not normalized
 
 
 def apply_zscore_normalize(data):
@@ -306,9 +435,10 @@ def preprocess_data(input_file, output_dir='data/processed', variance_threshold=
     # Load data
     expression_data, target_labels, gene_names, sample_names = load_data_with_target(input_file)
     
-    # Log2 transformation
+    # Log2 transformation (returns data and normalization status)
+    is_already_normalized = False
     if apply_log2:
-        expression_data = apply_log2_transform(expression_data)
+        expression_data, is_already_normalized = apply_log2_transform(expression_data)
     else:
         print("\n[Skipping] Log2 transformation")
     
@@ -316,9 +446,15 @@ def preprocess_data(input_file, output_dir='data/processed', variance_threshold=
     expression_data, selected_features = apply_variance_filter(expression_data, variance_threshold)
     selected_gene_names = gene_names[selected_features]
     
-    # Z-score normalization
+    # Z-score normalization (skip if already normalized)
     if apply_normalize:
-        expression_data, scaler = apply_zscore_normalize(expression_data)
+        if is_already_normalized:
+            print("\n[SKIP] Z-score normalization - data appears already normalized")
+            print("             (Mean near 0, has negatives, typical of z-score normalized data)")
+            print("             Skipping to avoid double normalization")
+            scaler = None  # No scaler needed for already-normalized data
+        else:
+            expression_data, scaler = apply_zscore_normalize(expression_data)
     else:
         scaler = None
         print("\n[Skipping] Z-score normalization")
@@ -428,7 +564,15 @@ if __name__ == "__main__":
     
     # Get preprocessing parameters from config
     preprocessing_config = config.get('preprocessing', {})
-    variance_threshold = args.variance_threshold or preprocessing_config.get('variance_threshold', 'mean')
+    
+    # Get variance threshold (prefer command line arg, then dataset-specific, then fallback)
+    if args.variance_threshold:
+        variance_threshold = args.variance_threshold
+    else:
+        # Try dataset-specific thresholds first
+        variance_thresholds = preprocessing_config.get('variance_thresholds', {})
+        # Use fallback to single threshold for backwards compatibility
+        variance_threshold = preprocessing_config.get('variance_threshold', 'mean')
     
     # Extract dataset paths from config
     if 'dataset_preparation' not in config:
@@ -441,6 +585,9 @@ if __name__ == "__main__":
     print("DATA PREPROCESSING")
     print("=" * 80)
     
+    # Get dataset-specific variance thresholds from config
+    variance_thresholds_dict = preprocessing_config.get('variance_thresholds', {})
+    
     # Process TCGA
     if args.dataset in ['tcga', 'both']:
         tcga_config = dataset_config.get('tcga', {})
@@ -449,6 +596,19 @@ if __name__ == "__main__":
         if tcga_output and Path(tcga_output).exists():
             print(f"\n[Processing TCGA BRCA]...")
             print(f"    Input: {tcga_output}")
+            
+            # Determine variance threshold for TCGA
+            if args.variance_threshold:
+                tcga_variance_threshold = args.variance_threshold
+            elif variance_thresholds_dict and 'tcga_brca_data' in variance_thresholds_dict:
+                tcga_variance_threshold = variance_thresholds_dict['tcga_brca_data']
+                print(f"    Using dataset-specific variance threshold: {tcga_variance_threshold}")
+            elif variance_thresholds_dict and 'default' in variance_thresholds_dict:
+                tcga_variance_threshold = variance_thresholds_dict['default']
+                print(f"    Using default variance threshold: {tcga_variance_threshold}")
+            else:
+                tcga_variance_threshold = variance_threshold
+            
             # Remove "_target_added" from output name since target is removed from .npy file
             output_base = Path(tcga_output).stem
             if output_base.endswith('_target_added'):
@@ -459,7 +619,7 @@ if __name__ == "__main__":
             preprocess_data(
                 tcga_output,
                 args.output_dir,
-                variance_threshold=variance_threshold,
+                variance_threshold=tcga_variance_threshold,
                 apply_log2=not args.no_log2,
                 apply_normalize=not args.no_normalize
             )
@@ -476,6 +636,19 @@ if __name__ == "__main__":
         if gse_output and Path(gse_output).exists():
             print(f"\n[Processing GSE96058]...")
             print(f"    Input: {gse_output}")
+            
+            # Determine variance threshold for GSE96058
+            if args.variance_threshold:
+                gse_variance_threshold = args.variance_threshold
+            elif variance_thresholds_dict and 'gse96058_data' in variance_thresholds_dict:
+                gse_variance_threshold = variance_thresholds_dict['gse96058_data']
+                print(f"    Using dataset-specific variance threshold: {gse_variance_threshold}")
+            elif variance_thresholds_dict and 'default' in variance_thresholds_dict:
+                gse_variance_threshold = variance_thresholds_dict['default']
+                print(f"    Using default variance threshold: {gse_variance_threshold}")
+            else:
+                gse_variance_threshold = variance_threshold
+            
             # Remove "_target_added" from output name since target is removed from .npy file
             output_base = Path(gse_output).stem
             if output_base.endswith('_target_added'):
@@ -486,7 +659,7 @@ if __name__ == "__main__":
             preprocess_data(
                 gse_output,
                 args.output_dir,
-                variance_threshold=variance_threshold,
+                variance_threshold=gse_variance_threshold,
                 apply_log2=not args.no_log2,
                 apply_normalize=not args.no_normalize
             )

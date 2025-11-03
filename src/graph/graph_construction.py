@@ -149,14 +149,15 @@ def load_graph_data(input_file):
 
 
 def construct_graphs(input_dir='data/processed', output_dir='data/graphs', 
-                    threshold=0.4, use_sparse=True):
+                    threshold=None, thresholds_dict=None, use_sparse=True):
     """
     Construct graphs for all processed datasets.
     
     Args:
         input_dir: Directory containing processed data
         output_dir: Directory to save graphs
-        threshold: Similarity threshold
+        threshold: Single similarity threshold (used if thresholds_dict not provided)
+        thresholds_dict: Dictionary mapping dataset names to thresholds (e.g., {'tcga_brca_data': 0.2, 'gse96058_data': 0.6})
         use_sparse: Whether to use sparse matrices
         
     Returns:
@@ -181,13 +182,27 @@ def construct_graphs(input_dir='data/processed', output_dir='data/graphs',
         print(f"CONSTRUCTING GRAPH: {dataset_name}")
         print("="*80)
         
+        # Determine threshold for this dataset
+        if thresholds_dict and dataset_name in thresholds_dict:
+            dataset_threshold = thresholds_dict[dataset_name]
+            print(f"Using dataset-specific threshold: {dataset_threshold}")
+        elif thresholds_dict and 'default' in thresholds_dict:
+            dataset_threshold = thresholds_dict['default']
+            print(f"Using default threshold: {dataset_threshold} (dataset '{dataset_name}' not in thresholds_dict)")
+        elif threshold is not None:
+            dataset_threshold = threshold
+            print(f"Using provided threshold: {dataset_threshold}")
+        else:
+            dataset_threshold = 0.4  # Fallback default
+            print(f"Using fallback default threshold: {dataset_threshold}")
+        
         # Load expression data
         expression_data = np.load(processed_file)
         
         # Build graph
         adjacency, similarity = build_similarity_graph(
             expression_data, 
-            threshold=threshold,
+            threshold=dataset_threshold,
             use_sparse=use_sparse
         )
         
@@ -206,20 +221,35 @@ def construct_graphs(input_dir='data/processed', output_dir='data/graphs',
 
 if __name__ == "__main__":
     import argparse
+    import yaml
     
     parser = argparse.ArgumentParser(description='Construct similarity graphs')
     parser.add_argument('--input_dir', type=str, default='data/processed', help='Input directory')
     parser.add_argument('--output_dir', type=str, default='data/graphs', help='Output directory')
-    parser.add_argument('--threshold', type=float, default=0.4, help='Similarity threshold')
+    parser.add_argument('--threshold', type=float, default=None, help='Single similarity threshold (overrides config)')
+    parser.add_argument('--config', type=str, default='config/config.yml', help='Config file for dataset-specific thresholds')
     parser.add_argument('--use_sparse', action='store_true', default=True, help='Use sparse matrices')
     parser.add_argument('--no_sparse', action='store_false', dest='use_sparse', help='Use dense matrices')
     
     args = parser.parse_args()
     
+    # Load thresholds from config if not provided
+    thresholds_dict = None
+    if args.threshold is None:
+        if Path(args.config).exists():
+            with open(args.config, 'r') as f:
+                config = yaml.safe_load(f)
+                preprocessing_config = config.get('preprocessing', {})
+                similarity_thresholds = preprocessing_config.get('similarity_thresholds', {})
+                if similarity_thresholds:
+                    thresholds_dict = similarity_thresholds
+                    print("Loaded dataset-specific thresholds from config")
+    
     construct_graphs(
         args.input_dir,
         args.output_dir,
         threshold=args.threshold,
+        thresholds_dict=thresholds_dict,
         use_sparse=args.use_sparse
     )
 

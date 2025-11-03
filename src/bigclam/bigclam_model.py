@@ -56,11 +56,12 @@ class BIGCLAM:
     
     def train(self, A, max_communities=10, iterations=100, lr=0.08):
         """
-        Train BIGCLAM model to automatically find optimal number of communities using AIC.
+        Train BIGCLAM model to automatically find optimal number of communities using BIC.
         
         The model tests communities from 1 to max_communities and automatically selects
-        the optimal number based on Akaike Information Criterion (AIC). Lower AIC indicates
-        better model fit with penalty for complexity.
+        the optimal number based on Bayesian Information Criterion (BIC). Lower BIC indicates
+        better model fit with penalty for complexity. BIC uses a stronger penalty than AIC,
+        making it more suitable for community detection as it better balances fit and complexity.
         
         Memory-efficient version supporting sparse matrices.
         
@@ -73,7 +74,7 @@ class BIGCLAM:
         Returns:
             tuple: (best_F, best_num_communities) where:
                 - best_F: Membership strength matrix (N x optimal_C) for optimal number of communities
-                - best_num_communities: Automatically determined optimal number of communities (via AIC)
+                - best_num_communities: Automatically determined optimal number of communities (via BIC)
         """
         # Convert sparse matrix to dense if needed (memory efficient for PyTorch)
         if issparse(A):
@@ -90,11 +91,12 @@ class BIGCLAM:
         N = A.shape[0]
         best_F = None
         best_num_communities = 1
-        best_aic = float('inf')
+        best_bic = float('inf')
         
         print(f"\n[Searching optimal communities] Testing 1 to {max_communities} communities...")
-        print(f"Using AIC (Akaike Information Criterion) for model selection")
-        print(f"(Lower AIC = better fit with complexity penalty)\n")
+        print(f"Using BIC (Bayesian Information Criterion) for model selection")
+        print(f"(Lower BIC = better fit with complexity penalty: log(N) × parameters)")
+        print(f"BIC uses stronger penalty than AIC, better for community detection\n")
         
         for num_communities in range(1, max_communities + 1):
             # Initialize membership strength matrix
@@ -112,25 +114,26 @@ class BIGCLAM:
                     # Ensure F is nonnegative
                     F.data = torch.clamp(F.data, min=1e-12)
             
-            # Calculate AIC
+            # Calculate BIC: BIC = -2 * log_likelihood + log(N) * k
+            # BIC uses log(N) penalty instead of constant 2, providing stronger penalty for larger N
             k = N * num_communities  # Number of parameters
-            aic = -2 * ll.item() + 2 * k
+            bic = -2 * ll.item() + np.log(N) * k
             
-            is_best = aic < best_aic
+            is_best = bic < best_bic
             if is_best:
-                best_aic = aic
+                best_bic = bic
                 best_F = F.detach().cpu().numpy()
                 best_num_communities = num_communities
             
             status = "★ BEST" if is_best else ""
-            print(f'  Communities={num_communities:2d}/{max_communities}, AIC: {aic:.4f} {status}')
+            print(f'  Communities={num_communities:2d}/{max_communities}, BIC: {bic:.4f} {status}')
             
             # Clean up GPU memory
             if self.device.type == 'cuda':
                 torch.cuda.empty_cache()
         
-        print(f"\n[Optimal Result] Best number of communities: {best_num_communities} (AIC: {best_aic:.4f})")
-        print(f"This value was automatically selected based on AIC model selection.")
+        print(f"\n[Optimal Result] Best number of communities: {best_num_communities} (BIC: {best_bic:.4f})")
+        print(f"This value was automatically selected based on BIC model selection.")
         return best_F, best_num_communities
     
     def visualize_bipartite(self, F, p2c=None, save_path=None):
@@ -176,7 +179,7 @@ def train_bigclam(A, max_communities=10, iterations=100, lr=0.08, device=None):
     """
     Convenience function to train BIGCLAM model with automatic community selection.
     
-    Automatically finds optimal number of communities using AIC by testing
+    Automatically finds optimal number of communities using BIC by testing
     all values from 1 to max_communities and selecting the best.
     
     Args:
@@ -189,7 +192,7 @@ def train_bigclam(A, max_communities=10, iterations=100, lr=0.08, device=None):
     Returns:
         tuple: (best_F, best_num_communities) where:
             - best_F: Membership strength matrix for optimal number of communities
-            - best_num_communities: Automatically determined optimal number (via AIC)
+            - best_num_communities: Automatically determined optimal number (via BIC)
     """
     model = BIGCLAM(device=device)
     return model.train(A, max_communities, iterations, lr)

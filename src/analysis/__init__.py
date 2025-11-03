@@ -11,6 +11,12 @@ from .parameter_sensitivity import (
     analyze_variance_threshold_sensitivity,
     analyze_similarity_threshold_sensitivity
 )
+from .parameter_grid_search import (
+    run_grid_search,
+    run_single_combination,
+    create_grid_search_visualizations,
+    clear_memory
+)
 
 __all__ = [
     'analyze_cross_dataset_consistency',
@@ -19,6 +25,10 @@ __all__ = [
     'find_matching_communities',
     'run_sensitivity_analysis',
     'analyze_variance_threshold_sensitivity',
-    'analyze_similarity_threshold_sensitivity'
+    'analyze_similarity_threshold_sensitivity',
+    'run_grid_search',
+    'run_single_combination',
+    'create_grid_search_visualizations',
+    'clear_memory'
 ]
 

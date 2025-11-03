@@ -40,58 +40,104 @@ def prepare_tcga_brca_data(clinical_file, expression_file, output_file):
     """
     Prepare TCGA BRCA data.
     
-    Format: Genes as rows, Samples as columns, oncotree as last column.
+    Format: Genes as rows, Samples as columns, PAM50/oncotree as last row.
+    
+    Args:
+        clinical_file: Path to clinical data file (contains PAM50 or Oncotree labels)
+        expression_file: Path to gene expression data file
+        output_file: Path to output file
     """
     print("=" * 80)
     print("PREPARING TCGA BRCA DATA")
     print("=" * 80)
     
-    # Load clinical data
-    print("\n[1/4] Loading clinical data...")
-    clinical = pd.read_csv(clinical_file, sep='\t', low_memory=False)
-    print(f"    Shape: {clinical.shape}")
+    # Load clinical file
+    use_clinical = clinical_file and Path(clinical_file).exists()
     
-    # Find sample ID column
-    sample_id_col = None
-    for col in ['Sample ID', 'Patient ID', 'Sample_ID', 'Patient_ID']:
-        if col in clinical.columns:
-            sample_id_col = col
-            break
-    if sample_id_col is None:
-        sample_id_col = [c for c in clinical.columns if 'ID' in c.upper()][0]
+    sample_to_label = {}
+    label_type = None
     
-    # Find Oncotree Code column for TCGA BRCA tumor subtype classification
-    oncotree_col = None
-    for col_name in ['Oncotree Code', 'OncotreeCode', 'Oncotree_Code']:
-        if col_name in clinical.columns:
-            oncotree_col = col_name
-            break
-    
-    # If Oncotree Code not found, try PAM50 as fallback
-    if not oncotree_col:
-        for pattern in ['PAM50', 'pam50 subtype', 'intrinsic subtype', 'molecular subtype']:
-            cols = [c for c in clinical.columns if pattern.upper() in c.upper()]
-            if cols:
-                oncotree_col = cols[0]
-                print(f"    Using '{oncotree_col}' as fallback (Oncotree Code not found)")
+    if use_clinical:
+        print("\n[1/4] Loading clinical data...")
+        clinical = pd.read_csv(clinical_file, sep='\t', low_memory=False)
+        print(f"    Shape: {clinical.shape}")
+        
+        # Find sample ID column
+        sample_id_col = None
+        for col in ['Patient ID', 'patient', 'Patient', 'Sample ID', 'Sample_ID', 'Patient_ID', 'bcr_patient_barcode']:
+            if col in clinical.columns:
+                sample_id_col = col
                 break
-    
-    if oncotree_col:
-        print(f"    [OK] Found subtype column: {oncotree_col}")
+        if sample_id_col is None:
+            id_cols = [c for c in clinical.columns if 'ID' in c.upper() or 'patient' in c.lower() or 'barcode' in c.lower()]
+            if id_cols:
+                sample_id_col = id_cols[0]
+            else:
+                sample_id_col = clinical.columns[0]
+        
+        print(f"    Using patient ID column: '{sample_id_col}'")
+        
+        # Look for PAM50 subtype column first (preferred)
+        pam50_col = None
+        for col in ['PAM50 subtype', 'BRCA_Subtype_PAM50', 'PAM50 Subtype']:
+            if col in clinical.columns:
+                pam50_col = col
+                label_type = 'PAM50'
+                break
+        
+        # If PAM50 not found, look for any column with PAM50 in name
+        if not pam50_col:
+            for col in clinical.columns:
+                if 'PAM50' in col and 'subtype' in col.lower():
+                    pam50_col = col
+                    label_type = 'PAM50'
+                    break
+        
+        # If still no PAM50, try Oncotree Code
+        oncotree_col = None
+        if not pam50_col:
+            for col_name in ['Oncotree Code', 'OncotreeCode', 'Oncotree_Code']:
+                if col_name in clinical.columns:
+                    oncotree_col = col_name
+                    label_type = 'Oncotree'
+                    break
+        
+        # If no Oncotree, look for any subtype column
+        subtype_col = oncotree_col or pam50_col
+        if not subtype_col:
+            for pattern in ['intrinsic subtype', 'molecular subtype', 'subtype']:
+                cols = [c for c in clinical.columns if pattern.lower() in c.lower()]
+                if cols:
+                    subtype_col = cols[0]
+                    if 'pam50' in subtype_col.lower():
+                        label_type = 'PAM50'
+                    else:
+                        label_type = 'Subtype'
+                    print(f"    Using '{subtype_col}' as subtype column")
+                    break
+        
+        if subtype_col:
+            print(f"    [OK] Found subtype column: '{subtype_col}'")
+            print(f"    Label type: {label_type}")
+        else:
+            print("    [WARNING] No subtype column found - will create file without subtype labels")
+            label_type = 'Unknown'
+        
+        # Create mapping: normalized_sample_id -> label
+        clinical_samples = clinical[sample_id_col].astype(str).values
+        for idx, sample_id in enumerate(clinical_samples):
+            norm_id = normalize_tcga_id(sample_id)
+            if subtype_col:
+                label = str(clinical.iloc[idx][subtype_col]).strip()
+                # Skip invalid values
+                if label and label.lower() not in ['nan', 'na', '', 'n/a', 'null', 'none']:
+                    sample_to_label[norm_id] = label
+        
+        print(f"    Samples with {label_type} labels: {len(sample_to_label)}")
     else:
-        print("    [WARNING] No subtype column found - will create file without subtype labels")
-    
-    # Create mapping: normalized_sample_id -> oncotree_label
-    clinical_samples = clinical[sample_id_col].astype(str).values
-    sample_to_oncotree = {}
-    for idx, sample_id in enumerate(clinical_samples):
-        norm_id = normalize_tcga_id(sample_id)
-        if oncotree_col:
-            label = str(clinical.iloc[idx][oncotree_col]).strip()
-            if label and label not in ['nan', 'NA', '']:
-                sample_to_oncotree[norm_id] = label
-    
-    print(f"    Samples with oncotree labels: {len(sample_to_oncotree)}")
+        print("\n[1/4] [WARNING] No clinical file provided")
+        print("    Will create output file without subtype labels")
+        label_type = 'Unknown'
     
     # Load expression data
     print("\n[2/4] Loading expression data...")
@@ -128,29 +174,30 @@ def prepare_tcga_brca_data(clinical_file, expression_file, output_file):
     
     # Find matching samples
     matched_samples = []
-    oncotree_labels = []
+    subtype_labels = []
     
     for norm_id, orig_cols in norm_to_original.items():
         matched_samples.append(orig_cols[0])  # Use first matching column
-        if norm_id in sample_to_oncotree:
-            oncotree_labels.append(sample_to_oncotree[norm_id])
+        if norm_id in sample_to_label:
+            subtype_labels.append(sample_to_label[norm_id])
         else:
-            oncotree_labels.append('Unknown')
+            subtype_labels.append('Unknown')
     
     print(f"    Matched: {len(matched_samples):,} samples")
-    print(f"    With oncotree labels: {sum(1 for x in oncotree_labels if x != 'Unknown'):,}")
+    print(f"    With {label_type} labels: {sum(1 for x in subtype_labels if x != 'Unknown'):,}")
     
     # Filter expression to matched samples
     expression_matched = expression[matched_samples].copy()
     
     # Transpose: genes as rows, samples as columns
-    print("\n[4/4] Transposing and adding oncotree...")
+    row_name = label_type if label_type and label_type != 'Unknown' else 'oncotree'
+    print(f"\n[4/4] Transposing and adding {row_name} labels...")
     expression_t = expression_matched.T  # Now: samples x genes
     
-    # Add oncotree as last column
-    expression_t['oncotree'] = oncotree_labels
+    # Add labels as last column (row name will be set to label_type)
+    expression_t[row_name] = subtype_labels
     
-    # Transpose back: genes (including oncotree) as rows, samples as columns
+    # Transpose back: genes (including label row) as rows, samples as columns
     expression_final = expression_t.T
     
     # Save
@@ -162,7 +209,7 @@ def prepare_tcga_brca_data(clinical_file, expression_file, output_file):
     print(f"    Final shape: {expression_final.shape}")
     print(f"    Genes (rows): {expression_final.shape[0]:,}")
     print(f"    Samples (columns): {expression_final.shape[1]:,}")
-    print(f"    oncotree labels: {sum(1 for x in oncotree_labels if x != 'Unknown'):,}")
+    print(f"    {row_name} labels: {sum(1 for x in subtype_labels if x != 'Unknown'):,}")
     
     return output_file
 
@@ -296,17 +343,21 @@ if __name__ == "__main__":
         tcga_expression = tcga_config.get('expression')
         tcga_output = tcga_config.get('output')
         
-        if tcga_clinical and tcga_expression and tcga_output:
-            if Path(tcga_clinical).exists() and Path(tcga_expression).exists():
-                prepare_tcga_brca_data(
-                    tcga_clinical,
-                    tcga_expression,
-                    tcga_output
-                )
-            else:
-                print(f"⚠ TCGA files not found. Skipping TCGA processing.")
-                print(f"   Clinical: {tcga_clinical}")
+        if tcga_expression and tcga_output:
+            # Check if expression file exists
+            if not Path(tcga_expression).exists():
+                print(f"⚠ TCGA expression file not found. Skipping TCGA processing.")
                 print(f"   Expression: {tcga_expression}")
+            else:
+                if not (tcga_clinical and Path(tcga_clinical).exists()):
+                    print(f"⚠ TCGA clinical file not found. Skipping TCGA processing.")
+                    print(f"   Clinical: {tcga_clinical}")
+                else:
+                    prepare_tcga_brca_data(
+                        tcga_clinical,
+                        tcga_expression,
+                        tcga_output
+                    )
         else:
             print("⚠ TCGA configuration incomplete in config file. Skipping.")
     

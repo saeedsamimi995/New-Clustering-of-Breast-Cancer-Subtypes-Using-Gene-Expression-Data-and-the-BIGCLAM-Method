@@ -9,7 +9,14 @@ from pathlib import Path
 import pickle
 import sys
 
-from ..bigclam.bigclam_model import train_bigclam
+# Handle imports for both module and direct execution
+try:
+    from ..bigclam.bigclam_model import train_bigclam
+except ImportError:
+    # Running as script directly, use absolute import
+    project_root = Path(__file__).parent.parent.parent
+    sys.path.insert(0, str(project_root))
+    from src.bigclam.bigclam_model import train_bigclam
 
 
 def cluster_data(adjacency, max_communities=10, iterations=100, lr=0.08):
@@ -42,7 +49,7 @@ def cluster_data(adjacency, max_communities=10, iterations=100, lr=0.08):
     communities = np.argmax(F, axis=1)
     
     print(f"\n[Results]")
-    print(f"    Optimal communities (AIC): {best_num_communities}")
+    print(f"    Optimal communities (BIC): {best_num_communities}")
     print(f"    Actual communities found: {len(set(communities))}")
     print(f"    Community sizes: {dict(zip(*np.unique(communities, return_counts=True)))}")
     

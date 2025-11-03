@@ -58,6 +58,16 @@ def evaluate_clustering(communities, target_labels, dataset_name="Dataset"):
     target_labels = np.array(target_labels)
     communities = np.array(communities)
     
+    # Ensure communities is 1D (flatten if needed)
+    if communities.ndim > 1:
+        communities = communities.flatten()
+    
+    # Ensure communities are integers (cluster IDs must be discrete)
+    # Handle both integer and float types from saved .npy files
+    if not np.issubdtype(communities.dtype, np.integer):
+        # Round to nearest integer if float, then convert to int
+        communities = np.round(communities).astype(np.int32)
+    
     # Remove samples with missing labels
     valid_mask = np.array([lbl != 'Unknown' and pd.notna(lbl) for lbl in target_labels])
     
@@ -139,13 +149,30 @@ def create_confusion_matrix_heatmap(communities, target_labels, dataset_name, ou
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    # Convert to numpy array and ensure 1D
+    communities = np.array(communities)
+    if communities.ndim > 1:
+        communities = communities.flatten()
+    
+    # Ensure communities are integers (cluster IDs must be discrete)
+    if not np.issubdtype(communities.dtype, np.integer):
+        communities = np.round(communities).astype(np.int32)
+    
     # Filter valid samples
     valid_mask = np.array([lbl != 'Unknown' and pd.notna(lbl) for lbl in target_labels])
     communities_valid = communities[valid_mask]
     labels_valid = np.array(target_labels)[valid_mask]
     
-    # Create confusion matrix
-    cm = confusion_matrix(labels_valid, communities_valid)
+    # Encode labels to integers for confusion matrix (handles string labels)
+    le = LabelEncoder()
+    labels_encoded = le.fit_transform(labels_valid)
+    
+    # Create confusion matrix (using encoded labels)
+    cm = confusion_matrix(labels_encoded, communities_valid)
+    
+    # Get unique labels (original string labels, sorted by their encoded order)
+    unique_labels = le.classes_
+    unique_clusters = sorted(np.unique(communities_valid))
     
     # Normalize by row (true label distribution)
     cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
@@ -153,15 +180,18 @@ def create_confusion_matrix_heatmap(communities, target_labels, dataset_name, ou
     # Plot
     fig, axes = plt.subplots(1, 2, figsize=(16, 6))
     
-    # Raw counts
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=axes[0], cbar_kws={'label': 'Count'})
+    # Raw counts - use original label names
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=axes[0], 
+                cbar_kws={'label': 'Count'},
+                xticklabels=unique_clusters, yticklabels=unique_labels)
     axes[0].set_title(f'{dataset_name}: Confusion Matrix (Counts)')
     axes[0].set_ylabel('True Label')
     axes[0].set_xlabel('Cluster')
     
-    # Normalized
+    # Normalized - use original label names
     sns.heatmap(cm_normalized, annot=True, fmt='.2f', cmap='Blues', ax=axes[1], 
-                cbar_kws={'label': 'Proportion'})
+                cbar_kws={'label': 'Proportion'},
+                xticklabels=unique_clusters, yticklabels=unique_labels)
     axes[1].set_title(f'{dataset_name}: Confusion Matrix (Proportions)')
     axes[1].set_ylabel('True Label')
     axes[1].set_xlabel('Cluster')
@@ -184,6 +214,15 @@ def create_cluster_distribution_plot(communities, target_labels, dataset_name, o
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Convert to numpy array and ensure 1D
+    communities = np.array(communities)
+    if communities.ndim > 1:
+        communities = communities.flatten()
+    
+    # Ensure communities are integers (cluster IDs must be discrete)
+    if not np.issubdtype(communities.dtype, np.integer):
+        communities = np.round(communities).astype(np.int32)
     
     # Filter valid samples
     valid_mask = np.array([lbl != 'Unknown' and pd.notna(lbl) for lbl in target_labels])

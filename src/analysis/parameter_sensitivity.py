@@ -330,14 +330,16 @@ def _compute_similarity_chunked(features, chunk_size=5000):
 def _count_connected_components_dense(adjacency):
     """Count connected components in dense adjacency matrix."""
     from scipy.sparse.csgraph import connected_components
-    n_components, _ = connected_components(csgraph=adjacency, directed=False, return_labels=False)
+    # Always request labels to ensure consistent return format
+    n_components, _ = connected_components(csgraph=adjacency, directed=False, return_labels=True)
     return n_components
 
 
 def _count_connected_components_sparse(adj_sparse):
     """Count connected components in sparse adjacency matrix."""
     from scipy.sparse.csgraph import connected_components
-    n_components, _ = connected_components(csgraph=adj_sparse, directed=False, return_labels=False)
+    # Always request labels to ensure consistent return format
+    n_components, _ = connected_components(csgraph=adj_sparse, directed=False, return_labels=True)
     return n_components
 
 
@@ -444,21 +446,37 @@ def _recommend_similarity_threshold(results, similarity_values):
         # Score based on multiple criteria
         score = 0
         
-        # Ideal density: 0.5-3%
-        if 0.5 <= density <= 3.0:
-            score += 3
-        elif 0.1 <= density <= 5.0:
-            score += 2
-        elif 0.05 <= density <= 10.0:
-            score += 1
+        # CRITICAL: For BIGCLAM, graph MUST be fully connected (1 component)
+        # CRITICAL: Graph density must be reasonable - too dense (>50%) means complete graph
+        # which makes community detection meaningless (everything connects to everything)
         
-        # Prefer fully connected (1 component)
-        if n_components == 1:
-            score += 3
+        # Disqualify extremely dense graphs (>50% - essentially complete graphs)
+        if density > 50.0:
+            score = -2000  # Strongly penalize complete/overly dense graphs
+        
+        # Disqualify fragmented graphs
+        elif n_components > 10:
+            score = -1000  # Strongly penalize fragmented graphs
+        elif n_components == 1:
+            score += 10  # Heavily favor fully connected graphs (REQUIRED for BIGCLAM)
         elif n_components <= 3:
-            score += 2
+            score += 5  # Acceptable if very few components
         elif n_components <= 10:
-            score += 1
+            score += 1  # Lower score for multiple components
+        
+        # Ideal density: 0.5-3% (best for clustering)
+        # Only score density if graph is connected
+        if n_components == 1 and density <= 50.0:
+            if 0.5 <= density <= 3.0:
+                score += 10  # Best range for clustering
+            elif 0.1 <= density <= 5.0:
+                score += 5
+            elif 3.0 < density <= 10.0:
+                score += 3  # Acceptable but getting dense
+            elif 10.0 < density <= 20.0:
+                score += 1  # Dense but acceptable if fully connected
+            elif 20.0 < density <= 50.0:
+                score += 0  # Very dense but still better than fragmented
         
         # Good average degree: 2-10
         if 2 <= avg_degree <= 10:
@@ -476,8 +494,23 @@ def _recommend_similarity_threshold(results, similarity_values):
         })
     
     # Find best candidate
-    best = max(candidates, key=lambda x: x['score'])
-    threshold = best['threshold']
+    # Strategy: Among fully connected graphs (n_components == 1), prefer highest threshold
+    # (which will have lower density) while maintaining connectivity
+    # CRITICAL: For BIGCLAM, connectivity is MORE IMPORTANT than density
+    # So we'll accept fully connected graphs even if density > 50%
+    fully_connected = [c for c in candidates if c['n_components'] == 1]
+    
+    if fully_connected:
+        # Among connected graphs, prefer HIGHEST threshold (lowest density)
+        # This gives the sparsest fully connected graph possible
+        # Sort by threshold (descending) to prefer higher thresholds
+        fully_connected_sorted = sorted(fully_connected, key=lambda x: x['threshold'], reverse=True)
+        best = fully_connected_sorted[0]  # Highest threshold (lowest density) among connected
+        threshold = best['threshold']
+    else:
+        # Fallback: if no fully connected graphs, use best overall
+        best = max(candidates, key=lambda x: x['score'])
+        threshold = best['threshold']
     
     # Determine reason
     density = best['density']

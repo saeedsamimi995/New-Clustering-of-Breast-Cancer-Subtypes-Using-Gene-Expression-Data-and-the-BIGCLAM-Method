@@ -1,0 +1,21 @@
+================================================================================
+SIMILARITY THRESHOLD RECOMMENDATIONS
+================================================================================
+
+Recommended Threshold: 0.6
+Reason: acceptable graph density (90.63%) - fully connected graph
+
+Analysis:
+- Graph density: 90.63%
+- Average degree: 3088.7
+- Number of edges: 5,264,664
+- Connected components: 1
+
+Guidelines:
+- Good threshold: 0.3-0.5 (balanced connectivity)
+- Too low (<0.3): Dense graph, many weak connections
+- Too high (>0.6): Sparse graph, disconnected components
+
+Alternative thresholds:
+  - 0.5: Denser graph (99.55% density, 3392.7 avg degree)
+  - 0.7: Sparser graph (41.07% density, 1399.8 avg degree)

@@ -45,16 +45,16 @@ venv.bak/
 
 # Data files (add specific files if they shouldn't be tracked)
 data/
-results/
+#results/
 
 # Results and outputs
-results/
-*.png
-*.pdf
-*.svg
-!docs/*.png
-!docs/*.pdf
-!docs/*.svg
+#results/
+# *.png
+# *.pdf
+# *.svg
+# !docs/*.png
+# !docs/*.pdf
+# !docs/*.svg
 
 # Logs
 *.log

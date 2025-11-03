@@ -1,0 +1,14 @@
+================================================================================
+VARIANCE THRESHOLD RECOMMENDATIONS
+================================================================================
+
+Recommended Threshold: 5
+Reason: Balanced filtering (11.4% retention) - acceptable compromise
+
+Analysis:
+- Features retained: 778
+- Retention rate: 11.4%
+- This threshold balances feature retention with noise removal
+
+Alternative thresholds:
+  - 7: More aggressive (7.1% retention)
