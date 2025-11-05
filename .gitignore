@@ -48,10 +48,13 @@ data/
 #results/
 
 # Results and outputs
-# Results and outputs
-results/grid_search/*.tiff
-results/grid_search/*.npy
-results/grid_search/*.pkl
+results/
+*.tiff
+*.tif
+*.npy
+*.npz
+*.pkl
+*.csv
 
 # Logs
 *.log
