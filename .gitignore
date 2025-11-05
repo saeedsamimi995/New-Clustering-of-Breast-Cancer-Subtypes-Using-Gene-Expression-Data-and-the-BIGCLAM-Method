@@ -48,13 +48,10 @@ data/
 #results/
 
 # Results and outputs
-#results/
-# *.png
-# *.pdf
-# *.svg
-# !docs/*.png
-# !docs/*.pdf
-# !docs/*.svg
+# Results and outputs
+results/grid_search/*.tiff
+results/grid_search/*.npy
+results/grid_search/*.pkl
 
 # Logs
 *.log
