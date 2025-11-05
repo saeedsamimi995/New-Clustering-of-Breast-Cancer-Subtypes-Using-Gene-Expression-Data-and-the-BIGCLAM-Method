@@ -159,11 +159,34 @@ def run_single_combination(input_file, variance_threshold, similarity_threshold,
         iterations = bigclam_config.get('iterations', 100)
         lr = bigclam_config.get('learning_rate', 0.08)
         
+        # Get optimization parameters from config
+        adaptive_lr = bigclam_config.get('adaptive_lr', True)
+        adaptive_iterations = bigclam_config.get('adaptive_iterations', True)
+        early_stopping = bigclam_config.get('early_stopping', True)
+        convergence_threshold = float(bigclam_config.get('convergence_threshold', 1e-6))
+        patience = int(bigclam_config.get('patience', 10))
+        
+        # Get criterion (AIC/BIC) for this dataset
+        criterion_config = bigclam_config.get('model_selection_criterion', {})
+        criterion = criterion_config.get(dataset_name, criterion_config.get('default', 'BIC'))
+        
+        # Get num_restarts for this dataset (from dataset_specific or default)
+        dataset_specific_config = bigclam_config.get('dataset_specific', {})
+        dataset_config = dataset_specific_config.get(dataset_name, {})
+        num_restarts = int(dataset_config.get('num_restarts', bigclam_config.get('num_restarts', 1)))
+        
         communities, membership, optimal_k = cluster_data(
             adjacency,
             max_communities=max_communities,
             iterations=iterations,
-            lr=lr
+            lr=lr,
+            criterion=criterion,
+            adaptive_lr=adaptive_lr,
+            adaptive_iterations=adaptive_iterations,
+            early_stopping=early_stopping,
+            convergence_threshold=convergence_threshold,
+            patience=patience,
+            num_restarts=num_restarts
         )
         
         n_communities = len(set(communities))

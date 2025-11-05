@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 import yaml
 import numpy as np
+import pickle
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent / "src"))
@@ -260,34 +261,57 @@ def main():
         iterations = bigclam_config.get('iterations', 100)
         lr = bigclam_config.get('learning_rate', 0.08)
         
+        # Get optimization parameters
+        adaptive_lr = bigclam_config.get('adaptive_lr', True)
+        adaptive_iterations = bigclam_config.get('adaptive_iterations', True)
+        early_stopping = bigclam_config.get('early_stopping', True)
+        convergence_threshold = float(bigclam_config.get('convergence_threshold', 1e-6))
+        patience = int(bigclam_config.get('patience', 10))
+        default_num_restarts = int(bigclam_config.get('num_restarts', 1))
+        
+        # Get dataset-specific model selection criteria (AIC/BIC)
+        criterion_config = bigclam_config.get('model_selection_criterion', {})
+        criterion_dict = {}
+        if criterion_config:
+            print("\nModel selection criteria:")
+            for dataset, criterion in criterion_config.items():
+                if dataset != 'default':
+                    criterion_dict[dataset] = criterion
+                    print(f"  {dataset}: {criterion}")
+            if 'default' in criterion_config:
+                criterion_dict['default'] = criterion_config['default']
+                print(f"  default: {criterion_config['default']}")
+        
+        # Get dataset-specific overrides and num_restarts
+        dataset_specific_config = bigclam_config.get('dataset_specific', {})
+        num_restarts_dict = {}
+        if dataset_specific_config:
+            print("\nDataset-specific configurations:")
+            for dataset, ds_config in dataset_specific_config.items():
+                if 'num_restarts' in ds_config:
+                    num_restarts_dict[dataset] = int(ds_config['num_restarts'])
+                    print(f"  {dataset}: num_restarts={ds_config['num_restarts']}")
+        
+        print("\nOptimization settings:")
+        print(f"  Adaptive LR: {adaptive_lr}")
+        print(f"  Adaptive iterations: {adaptive_iterations}")
+        print(f"  Early stopping: {early_stopping} (patience={patience}, threshold={convergence_threshold})")
+        print(f"  Default num_restarts: {default_num_restarts}")
+        
         cluster_all_graphs(input_dir='data/graphs', output_dir='data/clusterings',
-                         max_communities=max_communities, iterations=iterations, lr=lr)
+                         max_communities=max_communities, iterations=iterations, lr=lr,
+                         criterion_dict=criterion_dict if criterion_dict else None,
+                         adaptive_lr=adaptive_lr, adaptive_iterations=adaptive_iterations,
+                         early_stopping=early_stopping, convergence_threshold=convergence_threshold,
+                         patience=patience, num_restarts_dict=num_restarts_dict if num_restarts_dict else None,
+                         dataset_specific_config=dataset_specific_config if dataset_specific_config else None)
     
-    # Step 4: Evaluation
-    if 'evaluate' in steps_to_run:
-        print("\n" + "="*80)
-        print("STEP 4: EVALUATION")
-        print("="*80)
-        
-        evaluate_all_datasets(clustering_dir='data/clusterings',
-                            targets_dir='data/processed',
-                            output_dir='results/evaluation')
-    
-    # Step 5: Visualization
-    if 'visualize' in steps_to_run:
-        print("\n" + "="*80)
-        print("STEP 5: VISUALIZATION")
-        print("="*80)
-        
-        create_all_visualizations(processed_dir='data/processed',
-                                clustering_dir='data/clusterings',
-                                output_dir='results/visualization')
-    
-    # Step 6: Classification Validation
+    # Step 4: Classification Validation (using clustering results as targets)
     if 'classify' in steps_to_run and not args.skip_classification:
         print("\n" + "="*80)
-        print("STEP 6: CLASSIFICATION VALIDATION")
+        print("STEP 4: CLASSIFICATION VALIDATION")
         print("="*80)
+        print("Training SVM and MLP to predict BIGCLAM communities from expression data")
         
         classify_config = config.get('classifiers', {})
         mlp_params = classify_config.get('mlp', {})
@@ -298,13 +322,107 @@ def main():
                                            output_dir='results/classification',
                                            mlp_params=mlp_params, svm_params=svm_params)
     
+    # Step 5: Evaluation
+    if 'evaluate' in steps_to_run:
+        print("\n" + "="*80)
+        print("STEP 5: EVALUATION")
+        print("="*80)
+        
+        evaluate_all_datasets(clustering_dir='data/clusterings',
+                            targets_dir='data/processed',
+                            output_dir='results/evaluation')
+    
+    # Step 6: Visualization
+    if 'visualize' in steps_to_run:
+        print("\n" + "="*80)
+        print("STEP 6: VISUALIZATION")
+        print("="*80)
+        
+        create_all_visualizations(processed_dir='data/processed',
+                                clustering_dir='data/clusterings',
+                                output_dir='results/visualization')
+    
     # Step 7: Interpretation
     if 'interpret' in steps_to_run:
         print("\n" + "="*80)
         print("STEP 7: INTERPRETATION")
         print("="*80)
-        print("Interpretation results are included in evaluation output above.")
-        print("See results/evaluation/ for detailed analysis.")
+        
+        clustering_dir = Path('data/clusterings')
+        processed_dir = Path('data/processed')
+        interpretation_output_dir = Path('results/interpretation')
+        interpretation_output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Find all clustering files
+        clustering_files = list(clustering_dir.glob('*_communities.npy'))
+        
+        for clustering_file in clustering_files:
+            dataset_name = clustering_file.stem.replace('_communities', '')
+            
+            print("\n" + "-"*80)
+            print(f"INTERPRETING: {dataset_name}")
+            print("-"*80)
+            
+            # Load communities
+            communities = np.load(clustering_file)
+            
+            # Fix: If communities is 2D (membership matrix), convert to 1D (assignments)
+            if communities.ndim == 2:
+                print(f"[INFO] Converting 2D membership matrix to 1D community assignments...")
+                communities = np.argmax(communities, axis=1)
+            
+            communities = communities.flatten()
+            
+            # Load targets
+            target_file = processed_dir / f"{dataset_name}_targets.pkl"
+            if not target_file.exists():
+                print(f"[SKIP] No target file: {target_file}")
+                continue
+            
+            with open(target_file, 'rb') as f:
+                targets_data = pickle.load(f)
+            
+            target_labels = targets_data['target_labels']
+            label_type = targets_data.get('label_type', 'PAM50')
+            
+            # Get evaluation metrics if available
+            evaluation_file = Path('results/evaluation') / f"{dataset_name}_evaluation_results.pkl"
+            ari, nmi = None, None
+            if evaluation_file.exists():
+                try:
+                    with open(evaluation_file, 'rb') as f:
+                        eval_results = pickle.load(f)
+                        ari = eval_results.get('ari', None)
+                        nmi = eval_results.get('nmi', None)
+                except:
+                    pass
+            
+            # Interpret results
+            if ari is not None and nmi is not None:
+                interpretation = interpret_results(ari, nmi, dataset_name, label_type)
+            else:
+                print(f"[INFO] Evaluation metrics not available, skipping metric-based interpretation")
+                interpretation = None
+            
+            # Analyze overlap
+            overlap_results = analyze_overlap(communities, target_labels, dataset_name)
+            
+            # Save interpretation results
+            interpretation_data = {
+                'dataset_name': dataset_name,
+                'label_type': label_type,
+                'ari': ari,
+                'nmi': nmi,
+                'interpretation': interpretation,
+                'overlap_analysis': overlap_results,
+                'n_communities': len(set(communities)),
+                'n_samples': len(communities)
+            }
+            
+            with open(interpretation_output_dir / f"{dataset_name}_interpretation.pkl", 'wb') as f:
+                pickle.dump(interpretation_data, f)
+            
+            print(f"\n[Saved] Interpretation results to: {interpretation_output_dir / f'{dataset_name}_interpretation.pkl'}")
     
     # Step 8: Cross-Dataset Analysis
     if 'cross_dataset' in steps_to_run:
@@ -324,11 +442,13 @@ def main():
     print("  📊 Evaluation:     results/evaluation/")
     print("  📈 Visualizations: results/visualization/")
     print("  🤖 Classification: results/classification/")
+    print("  🔍 Interpretation: results/interpretation/")
     print("  🔗 Cross-dataset:  results/cross_dataset/")
     print("\nKey findings:")
     print("  • Check ARI/NMI scores in evaluation output")
     print("  • View t-SNE/UMAP plots to see cluster separation")
-    print("  • Review confusion matrices for label correspondence")
+    print("  • Review confusion matrices and ROC curves for classification performance")
+    print("  • Check interpretation results for biological significance")
     print("  • Examine cross-dataset correlations for consistency")
     print("="*80)
 

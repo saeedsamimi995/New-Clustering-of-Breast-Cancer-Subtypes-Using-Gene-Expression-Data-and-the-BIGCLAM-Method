@@ -284,6 +284,14 @@ def evaluate_all_datasets(clustering_dir='data/clusterings', targets_dir='data/p
         # Load communities
         communities = np.load(clustering_file)
         
+        # Fix: If communities is 2D (membership matrix), convert to 1D (assignments)
+        if communities.ndim == 2:
+            print(f"[INFO] Converting 2D membership matrix to 1D community assignments...")
+            communities = np.argmax(communities, axis=1)
+        
+        # Ensure 1D array
+        communities = communities.flatten()
+        
         # Load targets
         target_file = targets_dir / f"{dataset_name}_targets.pkl"
         if not target_file.exists():
@@ -294,6 +302,12 @@ def evaluate_all_datasets(clustering_dir='data/clusterings', targets_dir='data/p
             targets_data = pickle.load(f)
         
         target_labels = targets_data['target_labels']
+        
+        # Validate sizes match
+        if len(communities) != len(target_labels):
+            print(f"\n[ERROR] Size mismatch: communities={len(communities)}, targets={len(target_labels)}")
+            print(f"        Skipping {dataset_name}...")
+            continue
         
         # Evaluate
         eval_results, result_df = evaluate_clustering(communities, target_labels, dataset_name)

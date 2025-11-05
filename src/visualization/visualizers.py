@@ -212,6 +212,20 @@ def create_all_visualizations(processed_dir='data/processed',
         
         communities = np.load(clustering_file)
         
+        # Fix: If communities is 2D (membership matrix), convert to 1D (assignments)
+        if communities.ndim == 2:
+            print(f"[INFO] Converting 2D membership matrix to 1D community assignments...")
+            communities = np.argmax(communities, axis=1)
+        
+        # Ensure 1D array
+        communities = communities.flatten()
+        
+        # Validate sizes match
+        if len(communities) != expression_data.shape[0]:
+            print(f"[ERROR] Size mismatch: communities={len(communities)}, expression_data={expression_data.shape[0]}")
+            print(f"        Skipping {dataset_name}...")
+            continue
+        
         # Load targets
         target_file = processed_dir / f"{dataset_name}_targets.pkl"
         if not target_file.exists():

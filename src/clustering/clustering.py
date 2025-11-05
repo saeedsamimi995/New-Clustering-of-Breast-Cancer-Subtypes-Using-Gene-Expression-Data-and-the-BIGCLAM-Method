@@ -19,37 +19,54 @@ except ImportError:
     from src.bigclam.bigclam_model import train_bigclam
 
 
-def cluster_data(adjacency, max_communities=10, iterations=100, lr=0.08):
+def cluster_data(adjacency, max_communities=10, iterations=100, lr=0.08, criterion='BIC',
+                 adaptive_lr=True, adaptive_iterations=True, early_stopping=True,
+                 convergence_threshold=1e-6, patience=10, num_restarts=1):
     """
     Apply BIGCLAM clustering to adjacency matrix.
     
     Args:
         adjacency: Adjacency matrix (sparse or dense)
         max_communities: Maximum number of communities to search
-        iterations: Number of optimization iterations
-        lr: Learning rate
+        iterations: Base number of optimization iterations
+        lr: Base learning rate
+        criterion: Model selection criterion ('AIC' or 'BIC')
+        adaptive_lr: Automatically adjust learning rate based on graph size
+        adaptive_iterations: Automatically adjust iterations based on graph size and community number
+        early_stopping: Enable early stopping when convergence detected
+        convergence_threshold: Loss change threshold for convergence
+        patience: Number of iterations without improvement before stopping
+        num_restarts: Number of random restarts per community number
         
     Returns:
         tuple: (communities, membership_matrix, optimal_num_communities)
     """
     print("\n[Clustering] Applying BIGCLAM...")
     print(f"    Max communities: {max_communities}")
-    print(f"    Iterations: {iterations}")
-    print(f"    Learning rate: {lr}")
+    print(f"    Base iterations: {iterations}")
+    print(f"    Base learning rate: {lr}")
+    print(f"    Model selection: {criterion}")
     
     # Train BIGCLAM
     F, best_num_communities = train_bigclam(
         adjacency,
         max_communities=max_communities,
         iterations=iterations,
-        lr=lr
+        lr=lr,
+        criterion=criterion,
+        adaptive_lr=adaptive_lr,
+        adaptive_iterations=adaptive_iterations,
+        early_stopping=early_stopping,
+        convergence_threshold=convergence_threshold,
+        patience=patience,
+        num_restarts=num_restarts
     )
     
     # Get community assignments
     communities = np.argmax(F, axis=1)
     
     print(f"\n[Results]")
-    print(f"    Optimal communities (BIC): {best_num_communities}")
+    print(f"    Optimal communities ({criterion}): {best_num_communities}")
     print(f"    Actual communities found: {len(set(communities))}")
     print(f"    Community sizes: {dict(zip(*np.unique(communities, return_counts=True)))}")
     
@@ -68,6 +85,12 @@ def save_clustering_results(communities, membership, optimal_k, output_file):
     """
     output_file = Path(output_file)
     output_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Ensure communities is 1D (flatten if needed)
+    if communities.ndim > 1:
+        print(f"[WARNING] Communities is {communities.ndim}D, converting to 1D using argmax...")
+        communities = np.argmax(communities, axis=1)
+    communities = communities.flatten()
     
     # Save numpy arrays
     np.save(output_file.with_suffix('.npy'), communities)
@@ -113,7 +136,10 @@ def load_clustering_results(input_file):
 
 
 def cluster_all_graphs(input_dir='data/graphs', output_dir='data/clusterings',
-                      max_communities=10, iterations=100, lr=0.08):
+                      max_communities=10, iterations=100, lr=0.08, criterion_dict=None,
+                      adaptive_lr=True, adaptive_iterations=True, early_stopping=True,
+                      convergence_threshold=1e-6, patience=10, num_restarts_dict=None,
+                      dataset_specific_config=None):
     """
     Apply clustering to all graphs.
     
@@ -122,7 +148,18 @@ def cluster_all_graphs(input_dir='data/graphs', output_dir='data/clusterings',
         output_dir: Directory to save clusterings
         max_communities: Maximum communities to search
         iterations: Iterations per community number
-        lr: Learning rate
+        lr: Base learning rate
+        criterion_dict: Dictionary mapping dataset names to criterion ('AIC' or 'BIC')
+                       If None, uses 'BIC' for all datasets
+        adaptive_lr: Automatically adjust learning rate based on graph size
+        adaptive_iterations: Automatically adjust iterations based on graph size
+        early_stopping: Enable early stopping when convergence detected
+        convergence_threshold: Loss change threshold for convergence
+        patience: Number of iterations without improvement before stopping
+        num_restarts_dict: Dictionary mapping dataset names to num_restarts
+                          If None, uses num_restarts from dataset_specific_config or default
+        dataset_specific_config: Dictionary with dataset-specific overrides
+                                Format: {dataset_name: {iterations, learning_rate, num_restarts}}
         
     Returns:
         dict: Clustering results for each dataset
@@ -130,6 +167,13 @@ def cluster_all_graphs(input_dir='data/graphs', output_dir='data/clusterings',
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    
+    if criterion_dict is None:
+        criterion_dict = {}
+    if num_restarts_dict is None:
+        num_restarts_dict = {}
+    if dataset_specific_config is None:
+        dataset_specific_config = {}
     
     results = {}
     
@@ -146,6 +190,15 @@ def cluster_all_graphs(input_dir='data/graphs', output_dir='data/clusterings',
         print(f"CLUSTERING: {dataset_name}")
         print("="*80)
         
+        # Determine parameters for this dataset (with dataset-specific overrides)
+        criterion = criterion_dict.get(dataset_name, criterion_dict.get('default', 'BIC'))
+        
+        # Get dataset-specific overrides
+        dataset_config = dataset_specific_config.get(dataset_name, {})
+        dataset_iterations = dataset_config.get('iterations', iterations)
+        dataset_lr = dataset_config.get('learning_rate', lr)
+        dataset_num_restarts = num_restarts_dict.get(dataset_name, dataset_config.get('num_restarts', 1))
+        
         # Load graph
         if graph_file.suffix == '.npz':
             from scipy.sparse import load_npz
@@ -157,8 +210,15 @@ def cluster_all_graphs(input_dir='data/graphs', output_dir='data/clusterings',
         communities, membership, optimal_k = cluster_data(
             adjacency,
             max_communities=max_communities,
-            iterations=iterations,
-            lr=lr
+            iterations=dataset_iterations,
+            lr=dataset_lr,
+            criterion=criterion,
+            adaptive_lr=adaptive_lr,
+            adaptive_iterations=adaptive_iterations,
+            early_stopping=early_stopping,
+            convergence_threshold=convergence_threshold,
+            patience=patience,
+            num_restarts=dataset_num_restarts
         )
         
         # Save results

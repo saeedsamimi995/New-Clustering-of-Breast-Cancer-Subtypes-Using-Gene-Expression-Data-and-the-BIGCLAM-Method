@@ -113,7 +113,24 @@ def train_mlp_classifier(X_train, y_train, X_valid, y_valid, X_test, y_test, **p
             hidden_layers=hidden_layers
         )
         
-        train_cm, valid_cm, test_cm = results[0], results[1], results[2]
+        # Get best run results
+        best_run_idx = results.get('best_run_idx', 0)
+        train_cm = results['train_cms'][best_run_idx]
+        valid_cm = results['valid_cms'][best_run_idx]
+        test_cm = results['test_cms'][best_run_idx]
+        
+        # Get probability outputs (softmax probabilities)
+        test_outputs = results['best_test_outputs']
+        # Convert to numpy if it's a torch tensor
+        try:
+            import torch
+            if hasattr(test_outputs, 'numpy'):  # Check if it's a torch tensor
+                test_proba = test_outputs.numpy()
+            else:
+                test_proba = np.array(test_outputs) if test_outputs is not None else None
+        except (ImportError, AttributeError):
+            # If torch not available or not a tensor, assume numpy array
+            test_proba = np.array(test_outputs) if test_outputs is not None else None
         
         # Calculate accuracies
         train_acc = np.trace(train_cm) / train_cm.sum()
@@ -133,6 +150,8 @@ def train_mlp_classifier(X_train, y_train, X_valid, y_valid, X_test, y_test, **p
             'train_cm': train_cm,
             'valid_cm': valid_cm,
             'test_cm': test_cm,
+            'test_proba': test_proba,
+            'y_test': y_test,
             'results': results
         }
         
@@ -163,6 +182,7 @@ def create_classification_plots(svm_results, mlp_results, label_encoder, output_
         if results is None:
             continue
         
+        # Confusion matrices
         fig, axes = plt.subplots(1, 3, figsize=(18, 5))
         
         for idx, (split, cm) in enumerate([('Train', results['train_cm']), 
@@ -170,16 +190,95 @@ def create_classification_plots(svm_results, mlp_results, label_encoder, output_
                                            ('Test', results['test_cm'])]):
             sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=axes[idx],
                        xticklabels=label_names[:n_classes], 
-                       yticklabels=label_names[:n_classes])
-            axes[idx].set_title(f'{classifier_name} - {split}')
-            axes[idx].set_xlabel('Predicted')
-            axes[idx].set_ylabel('True')
+                       yticklabels=label_names[:n_classes],
+                       cbar_kws={'label': 'Count'})
+            axes[idx].set_title(f'{classifier_name} - {split} Set', fontsize=12, fontweight='bold')
+            axes[idx].set_xlabel('Predicted Community', fontsize=10)
+            axes[idx].set_ylabel('True Community', fontsize=10)
         
+        plt.suptitle(f'{classifier_name} Confusion Matrices - {dataset_name}', 
+                    fontsize=14, fontweight='bold', y=1.02)
         plt.tight_layout()
-        plt.savefig(output_dir / f"{dataset_name.lower()}_{classifier_name.lower()}_confusion_matrix.png", 
-                   dpi=300, bbox_inches='tight')
-        print(f"    [Saved] {dataset_name.lower()}_{classifier_name.lower()}_confusion_matrix.png")
+        plt.savefig(output_dir / f"{dataset_name.lower()}_{classifier_name.lower()}_confusion_matrix.tiff", 
+                   dpi=300, bbox_inches='tight', format='tiff')
+        print(f"    [Saved] {dataset_name.lower()}_{classifier_name.lower()}_confusion_matrix.tiff")
         plt.close()
+        
+        # ROC curves (only if we have probability predictions)
+        if 'y_test_proba' in results or 'test_proba' in results or 'y_test' in results:
+            fig, ax = plt.subplots(figsize=(10, 8))
+            
+            # Get probabilities
+            if 'y_test_proba' in results:
+                y_test_proba = results['y_test_proba']
+                y_test = results.get('y_test', None)
+            elif 'test_proba' in results:
+                y_test_proba = results['test_proba']
+                y_test = results.get('y_test', None)
+            else:
+                y_test_proba = None
+                y_test = None
+            
+            # For MLP, test_proba might be numpy array
+            if y_test_proba is not None:
+                if hasattr(y_test_proba, 'numpy'):
+                    y_test_proba = y_test_proba.numpy()
+                y_test_proba = np.array(y_test_proba)
+            
+            if y_test_proba is not None and y_test is not None:
+                from sklearn.preprocessing import label_binarize
+                from sklearn.metrics import roc_curve, auc, roc_auc_score
+                
+                # Binarize labels for multi-class ROC
+                y_test_bin = label_binarize(y_test, classes=range(n_classes))
+                
+                if n_classes == 2:
+                    # Binary classification
+                    fpr, tpr, _ = roc_curve(y_test, y_test_proba[:, 1])
+                    roc_auc = auc(fpr, tpr)
+                    ax.plot(fpr, tpr, lw=2, label=f'ROC curve (AUC = {roc_auc:.3f})')
+                else:
+                    # Multi-class: Compute ROC for each class
+                    for i in range(n_classes):
+                        fpr, tpr, _ = roc_curve(y_test_bin[:, i], y_test_proba[:, i])
+                        roc_auc = auc(fpr, tpr)
+                        ax.plot(fpr, tpr, lw=2, 
+                               label=f'Community {label_names[i]} (AUC = {roc_auc:.3f})')
+                    
+                    # Compute macro-average ROC
+                    fpr_macro, tpr_macro, _ = roc_curve(y_test_bin.ravel(), y_test_proba.ravel())
+                    roc_auc_macro = auc(fpr_macro, tpr_macro)
+                    ax.plot(fpr_macro, tpr_macro, lw=2, linestyle='--',
+                           label=f'Macro-average (AUC = {roc_auc_macro:.3f})')
+                
+                ax.plot([0, 1], [0, 1], 'k--', lw=1, label='Random')
+                ax.set_xlim([0.0, 1.0])
+                ax.set_ylim([0.0, 1.05])
+                ax.set_xlabel('False Positive Rate', fontsize=12, fontweight='bold')
+                ax.set_ylabel('True Positive Rate', fontsize=12, fontweight='bold')
+                ax.set_title(f'{classifier_name} ROC Curves - {dataset_name}', 
+                           fontsize=14, fontweight='bold')
+                ax.legend(loc="lower right", fontsize=10)
+                ax.grid(alpha=0.3)
+                
+                plt.tight_layout()
+                plt.savefig(output_dir / f"{dataset_name.lower()}_{classifier_name.lower()}_roc_curve.tiff", 
+                           dpi=300, bbox_inches='tight', format='tiff')
+                print(f"    [Saved] {dataset_name.lower()}_{classifier_name.lower()}_roc_curve.tiff")
+                plt.close()
+            
+            # Store AUC in results
+            if y_test_proba is not None and y_test is not None:
+                try:
+                    if n_classes == 2:
+                        results['test_auc'] = roc_auc_score(y_test, y_test_proba[:, 1])
+                    else:
+                        results['test_auc_macro'] = roc_auc_score(y_test, y_test_proba, 
+                                                                  multi_class='ovr', average='macro')
+                        results['test_auc_weighted'] = roc_auc_score(y_test, y_test_proba, 
+                                                                     multi_class='ovr', average='weighted')
+                except:
+                    pass
 
 
 def validate_clustering_with_classifiers(processed_dir='data/processed',
@@ -187,7 +286,10 @@ def validate_clustering_with_classifiers(processed_dir='data/processed',
                                         output_dir='results/classification',
                                         mlp_params=None, svm_params=None):
     """
-    Validate clustering by training classifiers to predict labels from communities.
+    Validate clustering by training classifiers to predict communities from expression data.
+    
+    Uses expression data as features and clustering results (communities) as targets.
+    This validates that the discovered communities are learnable from expression profiles.
     
     Args:
         processed_dir: Directory with processed data
@@ -198,6 +300,8 @@ def validate_clustering_with_classifiers(processed_dir='data/processed',
     """
     processed_dir = Path(processed_dir)
     clustering_dir = Path(clustering_dir)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     
     # Find all clustering files
     clustering_files = list(clustering_dir.glob('*_communities.npy'))
@@ -218,64 +322,81 @@ def validate_clustering_with_classifiers(processed_dir='data/processed',
         print("\n" + "="*80)
         print(f"VALIDATING: {dataset_name}")
         print("="*80)
+        print("Using expression data as features to predict BIGCLAM communities")
         
-        # Load communities
-        communities = np.load(clustering_file)
-        
-        # Load targets
-        target_file = processed_dir / f"{dataset_name}_targets.pkl"
-        if not target_file.exists():
-            print(f"[SKIP] No target file: {target_file}")
+        # Load expression data (features)
+        expression_file = processed_dir / f"{dataset_name}_processed.npy"
+        if not expression_file.exists():
+            print(f"[SKIP] No expression file: {expression_file}")
             continue
         
-        with open(target_file, 'rb') as f:
-            targets_data = pickle.load(f)
+        expression_data = np.load(expression_file)
+        print(f"    Expression data shape: {expression_data.shape}")
         
-        target_labels = targets_data['target_labels']
+        # Load communities (targets)
+        communities = np.load(clustering_file)
         
-        # Encode labels
-        labels_encoded, le = encode_labels(target_labels)
+        # Fix: If communities is 2D (membership matrix), convert to 1D (assignments)
+        if communities.ndim == 2:
+            print(f"[INFO] Converting 2D membership matrix to 1D community assignments...")
+            communities = np.argmax(communities, axis=1)
         
-        # Use communities as features
-        # Convert communities to one-hot encoding
-        from sklearn.preprocessing import OneHotEncoder
-        oe = OneHotEncoder(sparse=False)
-        communities_onehot = oe.fit_transform(communities.reshape(-1, 1))
+        # Ensure 1D array
+        communities = communities.flatten()
         
-        # Use community memberships if available
-        membership_file = clustering_dir / f"{dataset_name}_communities_membership.npy"
-        if membership_file.exists():
-            membership_matrix = np.load(membership_file)
-            X = membership_matrix  # Use membership matrix as features
-            print(f"    Using membership matrix as features: {membership_matrix.shape}")
-        else:
-            X = communities_onehot
-            print(f"    Using one-hot encoded communities as features: {X.shape}")
+        # Validate sizes match
+        if len(communities) != expression_data.shape[0]:
+            print(f"[ERROR] Size mismatch: communities={len(communities)}, expression_data={expression_data.shape[0]}")
+            print(f"        Skipping {dataset_name}...")
+            continue
+        
+        print(f"    Communities shape: {communities.shape}")
+        print(f"    Number of communities: {len(set(communities))}")
+        
+        # Encode communities as labels
+        communities_encoded, le = encode_labels(communities)
+        
+        # Use expression data as features (X), communities as targets (y)
+        X = expression_data
+        y = communities_encoded
+        
+        print(f"    Features (expression): {X.shape}")
+        print(f"    Targets (communities): {y.shape}")
         
         # Split data
         X_train, X_valid, X_test, y_train, y_valid, y_test = split_data(
-            X, labels_encoded, test_size=0.2, valid_size=0.2
+            X, y, test_size=0.2, valid_size=0.2
         )
         
         # Train classifiers
         svm_results = train_svm(X_train, y_train, X_valid, y_valid, X_test, y_test, **svm_params)
         mlp_results = train_mlp_classifier(X_train, y_train, X_valid, y_valid, X_test, y_test, **mlp_params)
         
-        # Create plots
+        # Add probability predictions for ROC curves
+        if svm_results:
+            from sklearn.svm import SVC
+            svm_model = SVC(kernel=svm_params.get('kernel', 'rbf'), 
+                           C=svm_params.get('C', 0.1),
+                           gamma=svm_params.get('gamma', 'scale'),
+                           probability=True, random_state=42)
+            svm_model.fit(X_train, y_train)
+            svm_results['y_test_proba'] = svm_model.predict_proba(X_test)
+            svm_results['y_test'] = y_test
+        
+        # Create plots (confusion matrices and ROC curves)
         create_classification_plots(svm_results, mlp_results, le, output_dir, dataset_name)
         
         # Save results
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
         with open(output_dir / f"{dataset_name}_classification_results.pkl", 'wb') as f:
             pickle.dump({
                 'svm': svm_results,
                 'mlp': mlp_results,
-                'label_encoder': le
+                'label_encoder': le,
+                'n_communities': len(set(communities))
             }, f)
         
-        print(f"[Saved] Classification results to: {output_dir}")
+        print(f"\n[Saved] Classification results to: {output_dir}")
+        print(f"        Confusion matrices and ROC curves saved as .tiff files")
 
 
 if __name__ == "__main__":

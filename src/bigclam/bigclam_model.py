@@ -54,28 +54,50 @@ class BIGCLAM:
         
         print(f"Using device: {self.device}")
     
-    def train(self, A, max_communities=10, iterations=100, lr=0.08):
+    def train(self, A, max_communities=10, iterations=100, lr=0.08, criterion='BIC',
+              adaptive_lr=True, adaptive_iterations=True, early_stopping=True,
+              convergence_threshold=1e-6, patience=10, num_restarts=1):
         """
-        Train BIGCLAM model to automatically find optimal number of communities using BIC.
+        Train BIGCLAM model to automatically find optimal number of communities using AIC/BIC.
         
         The model tests communities from 1 to max_communities and automatically selects
-        the optimal number based on Bayesian Information Criterion (BIC). Lower BIC indicates
-        better model fit with penalty for complexity. BIC uses a stronger penalty than AIC,
-        making it more suitable for community detection as it better balances fit and complexity.
+        the optimal number based on Akaike Information Criterion (AIC) or Bayesian 
+        Information Criterion (BIC). Lower score indicates better model fit with penalty 
+        for complexity.
+        
+        - BIC: Uses log(N) × k penalty - stronger penalty, better for smaller datasets
+        - AIC: Uses 2 × k penalty - less penalty, better for larger datasets
         
         Memory-efficient version supporting sparse matrices.
         
         Args:
             A (np.ndarray, scipy.sparse matrix, or torch.Tensor): Adjacency matrix (N x N).
             max_communities (int): Maximum number of communities to test (searches 1 to this value).
-            iterations (int): Number of optimization iterations per community number.
-            lr (float): Learning rate for Adam optimizer.
+            iterations (int): Base number of optimization iterations per community number.
+            lr (float): Base learning rate for Adam optimizer.
+            criterion (str): Model selection criterion - 'AIC' or 'BIC' (default: 'BIC')
+            adaptive_lr (bool): Automatically adjust learning rate based on graph size (default: True)
+            adaptive_iterations (bool): Automatically adjust iterations based on graph size and community number (default: True)
+            early_stopping (bool): Enable early stopping when convergence detected (default: True)
+            convergence_threshold (float): Loss change threshold for convergence (default: 1e-6)
+            patience (int): Number of iterations without improvement before stopping (default: 10)
+            num_restarts (int): Number of random restarts per community number (default: 1)
             
         Returns:
             tuple: (best_F, best_num_communities) where:
                 - best_F: Membership strength matrix (N x optimal_C) for optimal number of communities
-                - best_num_communities: Automatically determined optimal number of communities (via BIC)
+                - best_num_communities: Automatically determined optimal number of communities
         """
+        criterion = criterion.upper()  # Normalize to uppercase
+        if criterion not in ['AIC', 'BIC']:
+            print(f"[WARNING] Invalid criterion '{criterion}', using 'BIC'")
+            criterion = 'BIC'
+        
+        # Convert parameters to correct types
+        convergence_threshold = float(convergence_threshold)
+        patience = int(patience)
+        num_restarts = int(num_restarts)
+        
         # Convert sparse matrix to dense if needed (memory efficient for PyTorch)
         if issparse(A):
             print("Converting sparse adjacency matrix to dense for training...")
@@ -89,51 +111,132 @@ class BIGCLAM:
             A = A.to(self.device)
         
         N = A.shape[0]
+        
+        # Adaptive learning rate based on graph size
+        if adaptive_lr:
+            if N < 1000:
+                adjusted_lr = lr
+            elif N < 2000:
+                adjusted_lr = lr * 0.75
+            else:
+                adjusted_lr = lr * 0.5
+            if adjusted_lr != lr:
+                print(f"[Adaptive LR] Graph size {N}: adjusted LR from {lr} to {adjusted_lr}")
+        else:
+            adjusted_lr = lr
+        
         best_F = None
         best_num_communities = 1
-        best_bic = float('inf')
+        best_score = float('inf')
         
+        criterion_name = "Akaike" if criterion == 'AIC' else "Bayesian"
+        penalty_formula = "2 × k" if criterion == 'AIC' else "log(N) × k"
         print(f"\n[Searching optimal communities] Testing 1 to {max_communities} communities...")
-        print(f"Using BIC (Bayesian Information Criterion) for model selection")
-        print(f"(Lower BIC = better fit with complexity penalty: log(N) × parameters)")
-        print(f"BIC uses stronger penalty than AIC, better for community detection\n")
+        print(f"Using {criterion} ({criterion_name} Information Criterion) for model selection")
+        print(f"(Lower {criterion} = better fit with complexity penalty: {penalty_formula})")
+        if criterion == 'BIC':
+            print(f"BIC uses stronger penalty than AIC, better for smaller datasets")
+        else:
+            print(f"AIC uses less penalty than BIC, better for larger datasets")
+        
+        if adaptive_iterations:
+            print(f"Adaptive iterations: enabled (more iterations for larger graphs/communities)")
+        if early_stopping:
+            print(f"Early stopping: enabled (patience={patience}, threshold={convergence_threshold})")
+        if num_restarts > 1:
+            print(f"Multiple restarts: {num_restarts} per community number")
+        print()
         
         for num_communities in range(1, max_communities + 1):
-            # Initialize membership strength matrix
-            F = torch.rand((N, num_communities), device=self.device, requires_grad=True)
-            optimizer = torch.optim.Adam([F], lr=lr)
+            # Adaptive iterations based on graph size and community number
+            if adaptive_iterations:
+                if N < 1000:
+                    adjusted_iterations = iterations
+                elif N < 2000:
+                    adjusted_iterations = int(iterations * 1.5)
+                else:
+                    adjusted_iterations = int(iterations * 2.0)
+                # Increase iterations for higher community numbers (10% more per community)
+                adjusted_iterations = int(adjusted_iterations * (1 + 0.1 * (num_communities - 1)))
+            else:
+                adjusted_iterations = iterations
             
-            for n in range(iterations):
-                optimizer.zero_grad()
-                ll = log_likelihood(F, A)
-                loss = -ll  # Minimize negative log-likelihood
-                loss.backward()
-                optimizer.step()
+            best_restart_F = None
+            best_restart_score = float('inf')
+            
+            # Multiple random restarts
+            for restart in range(num_restarts):
+                if num_restarts > 1:
+                    print(f"  Restart {restart + 1}/{num_restarts} for {num_communities} communities...")
                 
-                with torch.no_grad():
-                    # Ensure F is nonnegative
-                    F.data = torch.clamp(F.data, min=1e-12)
+                # Initialize membership strength matrix
+                F = torch.rand((N, num_communities), device=self.device, requires_grad=True)
+                optimizer = torch.optim.Adam([F], lr=adjusted_lr)
+                
+                best_loss = float('inf')
+                no_improvement_count = 0
+                
+                for n in range(adjusted_iterations):
+                    optimizer.zero_grad()
+                    ll = log_likelihood(F, A)
+                    loss = -ll  # Minimize negative log-likelihood
+                    loss.backward()
+                    optimizer.step()
+                    
+                    with torch.no_grad():
+                        # Ensure F is nonnegative
+                        F.data = torch.clamp(F.data, min=1e-12)
+                    
+                    # Early stopping check
+                    if early_stopping:
+                        loss_value = loss.item()
+                        if loss_value < best_loss - convergence_threshold:
+                            best_loss = loss_value
+                            no_improvement_count = 0
+                        else:
+                            no_improvement_count += 1
+                            if no_improvement_count >= patience:
+                                if num_restarts == 1:  # Only print if not doing multiple restarts
+                                    print(f"    Early stopping at iteration {n+1}/{adjusted_iterations}")
+                                break
+                
+                # Calculate score based on criterion
+                k = N * num_communities  # Number of parameters
+                if criterion == 'BIC':
+                    # BIC: BIC = -2 * log_likelihood + log(N) * k
+                    score = -2 * ll.item() + np.log(N) * k
+                else:
+                    # AIC: AIC = -2 * log_likelihood + 2 * k
+                    score = -2 * ll.item() + 2 * k
+                
+                # Track best restart for this community number
+                if score < best_restart_score:
+                    best_restart_score = score
+                    best_restart_F = F.detach().cpu().numpy()
+                
+                # Clean up GPU memory after each restart
+                if self.device.type == 'cuda':
+                    torch.cuda.empty_cache()
             
-            # Calculate BIC: BIC = -2 * log_likelihood + log(N) * k
-            # BIC uses log(N) penalty instead of constant 2, providing stronger penalty for larger N
-            k = N * num_communities  # Number of parameters
-            bic = -2 * ll.item() + np.log(N) * k
+            # Use best restart result
+            F_final = best_restart_F
+            score_final = best_restart_score
             
-            is_best = bic < best_bic
+            is_best = score_final < best_score
             if is_best:
-                best_bic = bic
-                best_F = F.detach().cpu().numpy()
+                best_score = score_final
+                best_F = F_final
                 best_num_communities = num_communities
             
             status = "★ BEST" if is_best else ""
-            print(f'  Communities={num_communities:2d}/{max_communities}, BIC: {bic:.4f} {status}')
+            print(f'  Communities={num_communities:2d}/{max_communities}, {criterion}: {score_final:.4f} {status}')
             
             # Clean up GPU memory
             if self.device.type == 'cuda':
                 torch.cuda.empty_cache()
         
-        print(f"\n[Optimal Result] Best number of communities: {best_num_communities} (BIC: {best_bic:.4f})")
-        print(f"This value was automatically selected based on BIC model selection.")
+        print(f"\n[Optimal Result] Best number of communities: {best_num_communities} ({criterion}: {best_score:.4f})")
+        print(f"This value was automatically selected based on {criterion} model selection.")
         return best_F, best_num_communities
     
     def visualize_bipartite(self, F, p2c=None, save_path=None):
@@ -175,25 +278,36 @@ class BIGCLAM:
             plt.show()
 
 
-def train_bigclam(A, max_communities=10, iterations=100, lr=0.08, device=None):
+def train_bigclam(A, max_communities=10, iterations=100, lr=0.08, device=None, criterion='BIC',
+                  adaptive_lr=True, adaptive_iterations=True, early_stopping=True,
+                  convergence_threshold=1e-6, patience=10, num_restarts=1):
     """
     Convenience function to train BIGCLAM model with automatic community selection.
     
-    Automatically finds optimal number of communities using BIC by testing
+    Automatically finds optimal number of communities using AIC/BIC by testing
     all values from 1 to max_communities and selecting the best.
     
     Args:
         A (np.ndarray or torch.Tensor): Adjacency matrix (N x N).
         max_communities (int): Maximum number of communities to test (searches 1 to this value).
-        iterations (int): Number of optimization iterations per community number.
-        lr (float): Learning rate for Adam optimizer.
+        iterations (int): Base number of optimization iterations per community number.
+        lr (float): Base learning rate for Adam optimizer.
         device (torch.device, optional): Device to use (GPU if available, else CPU).
+        criterion (str): Model selection criterion - 'AIC' or 'BIC' (default: 'BIC')
+        adaptive_lr (bool): Automatically adjust learning rate based on graph size (default: True)
+        adaptive_iterations (bool): Automatically adjust iterations based on graph size (default: True)
+        early_stopping (bool): Enable early stopping when convergence detected (default: True)
+        convergence_threshold (float): Loss change threshold for convergence (default: 1e-6)
+        patience (int): Number of iterations without improvement before stopping (default: 10)
+        num_restarts (int): Number of random restarts per community number (default: 1)
         
     Returns:
         tuple: (best_F, best_num_communities) where:
             - best_F: Membership strength matrix for optimal number of communities
-            - best_num_communities: Automatically determined optimal number (via BIC)
+            - best_num_communities: Automatically determined optimal number (via AIC/BIC)
     """
     model = BIGCLAM(device=device)
-    return model.train(A, max_communities, iterations, lr)
+    return model.train(A, max_communities, iterations, lr, criterion,
+                      adaptive_lr, adaptive_iterations, early_stopping,
+                      convergence_threshold, patience, num_restarts)
 

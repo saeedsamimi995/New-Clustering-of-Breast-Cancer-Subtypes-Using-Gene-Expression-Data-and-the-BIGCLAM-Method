@@ -21,34 +21,54 @@ dataset_preparation:
 preprocessing:
   chunk_size: null  # Auto-detect: use 10000 for files >500MB, null for smaller files
   
-  # Dataset-specific variance thresholds for feature selection
-  # Based on sensitivity analysis: more aggressive filtering = fewer features = better clustering
-  # Options: "mean", "median", "percentile_X" (keeps top (100-X)%), "top_X" (keeps exactly X features)
+  # Dataset-specific variance thresholds for feature selection (from grid search optimization)
+  # Numeric values specify the variance threshold directly
+  # Options: numeric value (e.g., 1.5), "mean", "median", "percentile_X", "top_X"
   variance_thresholds:
-    # Sensitivity analysis recommended ~11-15% retention for better community detection
-    tcga_brca_data: "percentile_85"  # TCGA-BRCA: Keep top 15% most variable (aggressive, helps find 4-5 communities)
-    gse96058_data: "percentile_85"   # GSE96058: Keep top 15% most variable (based on sensitivity analysis: 11.4% retention)
+    tcga_brca_data: 1.5  # TCGA-BRCA: Optimal from grid search (variance=1.5, similarity=0.15)
+    gse96058_data: 1.0  # GSE96058: Optimal from grid search (variance=1.0, similarity=0.1)
     default: "mean"  # Fallback: use mean variance if dataset not specified
   
-  # Note: "percentile_85" keeps top 15% of features (vs "mean" which keeps ~30-50%)
-  # This aggressive filtering focuses on most discriminative features, improving BIGCLAM clustering
-  
-  # Dataset-specific similarity thresholds (optimized via sensitivity analysis)
+  # Dataset-specific similarity thresholds (optimized via grid search)
   # These ensure fully connected graphs (required for BIGCLAM) with optimal density
   similarity_thresholds:
-    tcga_brca_data: 0.2  # TCGA-BRCA: 11.76% density, fully connected (1 component)
-    gse96058_data: 0.6  # GSE96058: 90.63% density, fully connected (1 component)
+    tcga_brca_data: 0.15  # TCGA-BRCA: Optimal from grid search (variance=1.5, similarity=0.15)
+    gse96058_data: 0.1  # GSE96058: Optimal from grid search (variance=1.0, similarity=0.1)
     # Default fallback if dataset not specified
     default: 0.4
   
 # BIGCLAM parameters
 bigclam:
-  max_communities: 10  # Maximum communities to search (model finds optimal using BIC)
+  max_communities: 10  # Maximum communities to search (model finds optimal using AIC/BIC)
   iterations: 100  # Optimization iterations per community number
   learning_rate: 0.08  # Adam optimizer learning rate
-  # Note: Optimal number of communities is automatically determined using BIC
+  
+  # Dataset-specific model selection criterion
+  # BIC (Bayesian Information Criterion): Stronger penalty for complexity, better for smaller datasets
+  # AIC (Akaike Information Criterion): Less penalty, better for larger datasets
+  model_selection_criterion:
+    tcga_brca_data: "BIC"  # TCGA-BRCA: 1,093 samples - use BIC
+    gse96058_data: "AIC"   # GSE96058: 3,409 samples - use AIC (BIC penalty too strong)
+    default: "BIC"  # Fallback if dataset not specified
+  
+  # Note: Optimal number of communities is automatically determined using AIC/BIC
   # The model tests 1 to max_communities and selects the best
-  # BIC uses stronger penalty than AIC, better for community detection
+  # BIC uses stronger penalty (log(N) × parameters) than AIC (2 × parameters)
+  
+  # Optimization improvements
+  adaptive_lr: true  # Adapt learning rate based on graph size (lower for larger graphs)
+  adaptive_iterations: true  # Adapt iterations based on graph size (more for larger graphs)
+  early_stopping: true  # Enable early stopping when convergence detected
+  convergence_threshold: 1e-6  # Convergence threshold for early stopping
+  patience: 10  # Number of iterations without improvement before stopping
+  num_restarts: 5  # Number of random restarts per community number (default for grid search consistency)
+  
+  # Dataset-specific overrides (overrides adaptive defaults)
+  dataset_specific:
+    tcga_brca_data:
+      num_restarts: 5  # TCGA-BRCA: 5 restarts (same as grid search)
+    gse96058_data:
+      num_restarts: 5  # GSE96058: 5 restarts (same as grid search)
   
 # Classifier parameters
 classifiers:

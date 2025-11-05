@@ -100,7 +100,7 @@ def analyze_overlap(communities, target_labels, dataset_name):
     Analyze overlapping communities and mixed subtypes.
     
     Args:
-        communities: Cluster assignments
+        communities: Cluster assignments (1D array or 2D membership matrix)
         target_labels: Ground truth labels
         dataset_name: Dataset name
         
@@ -110,6 +110,17 @@ def analyze_overlap(communities, target_labels, dataset_name):
     print("\n" + "="*80)
     print(f"OVERLAP ANALYSIS: {dataset_name}")
     print("="*80)
+    
+    # Convert to numpy array and ensure 1D
+    communities = np.array(communities)
+    
+    # Fix: If communities is 2D (membership matrix), convert to 1D (assignments)
+    if communities.ndim == 2:
+        print(f"[INFO] Converting 2D membership matrix to 1D community assignments...")
+        communities = np.argmax(communities, axis=1)
+    
+    # Ensure 1D array
+    communities = communities.flatten()
     
     # Get unique labels and clusters
     unique_labels = list(set(target_labels))
@@ -152,9 +163,9 @@ def identify_border_samples(communities, target_labels, membership_matrix):
     Identify samples on borders between subtypes (high membership in multiple communities).
     
     Args:
-        communities: Hard cluster assignments
+        communities: Hard cluster assignments (1D array or 2D membership matrix)
         target_labels: Ground truth labels
-        membership_matrix: Membership strength matrix
+        membership_matrix: Membership strength matrix (if None, will extract from communities if 2D)
         
     Returns:
         dict: Border sample analysis
@@ -163,7 +174,35 @@ def identify_border_samples(communities, target_labels, membership_matrix):
     print("BORDER SAMPLE ANALYSIS")
     print("="*80)
     
+    # Convert to numpy arrays
+    communities = np.array(communities)
+    
+    # Handle case where membership_matrix is None but communities is 2D
+    if membership_matrix is None and communities.ndim == 2:
+        membership_matrix = communities
+        communities = np.argmax(communities, axis=1)
+    elif membership_matrix is None:
+        raise ValueError("membership_matrix is required when communities is 1D")
+    
+    membership_matrix = np.array(membership_matrix)
+    
+    # Ensure communities is 1D
+    if communities.ndim > 1:
+        communities = np.argmax(communities, axis=1) if communities.ndim == 2 else communities.flatten()
+    else:
+        communities = communities.flatten()
+    
     # For each sample, find second-highest membership
+    if membership_matrix.shape[1] < 2:
+        # Need at least 2 communities for border analysis
+        print("[WARNING] Need at least 2 communities for border analysis")
+        return {
+            'n_border_samples': 0,
+            'border_samples': [],
+            'membership_ratios': [],
+            'border_labels': []
+        }
+    
     second_memberships = np.partition(membership_matrix, -2, axis=1)[:, -2]
     max_memberships = np.max(membership_matrix, axis=1)
     

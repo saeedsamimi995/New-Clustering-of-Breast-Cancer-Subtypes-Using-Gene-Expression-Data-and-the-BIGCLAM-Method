@@ -239,21 +239,47 @@ def analyze_cross_dataset_consistency(processed_dir='data/processed',
     gse_communities = clustering_dir / "gse96058_data_communities.npy"
     gse_membership = clustering_dir / "gse96058_data_communities_membership.npy"
     
-    # Check if files exist
-    if not all([f.exists() for f in [tcga_processed, tcga_communities, tcga_membership,
-                                     gse_processed, gse_communities, gse_membership]]):
+    # Check if required files exist (membership file is optional if communities is 2D)
+    required_files = [tcga_processed, tcga_communities, gse_processed, gse_communities]
+    if not all([f.exists() for f in required_files]):
         print("[ERROR] Required files not found. Please run preprocessing and clustering first.")
         return
+    
+    # Membership files are optional if communities files contain membership matrix (2D)
+    if not tcga_membership.exists():
+        print("[INFO] TCGA membership file not found - will extract from communities if 2D")
+    if not gse_membership.exists():
+        print("[INFO] GSE96058 membership file not found - will extract from communities if 2D")
     
     # Load data
     print("\n[Loading Data]...")
     tcga_expression = np.load(tcga_processed)
     tcga_communities = np.load(tcga_communities)
-    tcga_membership = np.load(tcga_membership)
+    
+    # Fix: If communities is 2D (membership matrix), convert to 1D (assignments)
+    if tcga_communities.ndim == 2:
+        print("[INFO] Converting TCGA-BRCA 2D membership matrix to 1D community assignments...")
+        tcga_membership = tcga_communities.copy()  # Save membership matrix
+        tcga_communities = np.argmax(tcga_communities, axis=1)
+    else:
+        tcga_membership = np.load(tcga_membership)
+    
+    # Ensure 1D
+    tcga_communities = tcga_communities.flatten()
     
     gse_expression = np.load(gse_processed)
     gse_communities = np.load(gse_communities)
-    gse_membership = np.load(gse_membership)
+    
+    # Fix: If communities is 2D (membership matrix), convert to 1D (assignments)
+    if gse_communities.ndim == 2:
+        print("[INFO] Converting GSE96058 2D membership matrix to 1D community assignments...")
+        gse_membership = gse_communities.copy()  # Save membership matrix
+        gse_communities = np.argmax(gse_communities, axis=1)
+    else:
+        gse_membership = np.load(gse_membership)
+    
+    # Ensure 1D
+    gse_communities = gse_communities.flatten()
     
     # Compute centroids
     print("\n" + "-"*80)
