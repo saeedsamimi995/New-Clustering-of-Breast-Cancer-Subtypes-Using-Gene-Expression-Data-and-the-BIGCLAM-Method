@@ -115,15 +115,15 @@ grid_search:
   tcga:
     variance_start: 0.5
     variance_end: 15.0
-    variance_step: 0.5
+    variance_step: 1.0
     similarity_start: 0.1
     similarity_end: 0.9
-    similarity_step: 0.05
+    similarity_step: 0.1
   gse96058:
     variance_start: 0.5
     variance_end: 15.0
-    variance_step: 0.5
+    variance_step: 1.0
     similarity_start: 0.1
     similarity_end: 0.9
-    similarity_step: 0.05
+    similarity_step: 0.1
 
