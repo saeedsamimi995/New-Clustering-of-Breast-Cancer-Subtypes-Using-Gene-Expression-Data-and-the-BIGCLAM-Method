@@ -91,7 +91,12 @@ def train_mlp_classifier(X_train, y_train, X_valid, y_valid, X_test, y_test, **p
     print("\n[Training MLP]...")
     
     # One-hot encode labels
-    oe = OneHotEncoder(sparse=False)
+    # Use sparse_output for newer sklearn versions, fallback to sparse for older versions
+    try:
+        oe = OneHotEncoder(sparse_output=False)
+    except TypeError:
+        # Fallback for older sklearn versions
+        oe = OneHotEncoder(sparse=False)
     y_train_onehot = oe.fit_transform(y_train.reshape(-1, 1))
     y_valid_onehot = oe.transform(y_valid.reshape(-1, 1))
     y_test_onehot = oe.transform(y_test.reshape(-1, 1))

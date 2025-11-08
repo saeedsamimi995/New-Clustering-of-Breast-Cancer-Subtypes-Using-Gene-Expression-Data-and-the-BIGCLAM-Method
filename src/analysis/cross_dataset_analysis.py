@@ -177,6 +177,16 @@ def create_dendrogram_heatmap(centroids_tcga, centroids_gse, output_file,
     """
     print(f"\n[Creating Dendrogram]...")
     
+    # Align feature dimensions
+    if centroids_tcga.shape[1] != centroids_gse.shape[1]:
+        n_features = min(centroids_tcga.shape[1], centroids_gse.shape[1])
+        print(f"    [WARNING] Feature dimension mismatch for dendrogram. Using first {n_features} features.")
+        centroids_tcga = centroids_tcga[:, :n_features]
+        centroids_gse = centroids_gse[:, :n_features]
+    else:
+        n_features = centroids_tcga.shape[1]
+        print(f"    Feature dimension aligned: {n_features}")
+
     # Combine centroids
     all_centroids = np.vstack([centroids_tcga, centroids_gse])
     
