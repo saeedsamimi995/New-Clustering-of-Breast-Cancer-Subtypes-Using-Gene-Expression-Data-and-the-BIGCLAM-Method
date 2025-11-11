@@ -28,10 +28,17 @@ This project implements a modular pipeline for clustering breast cancer subtypes
 - ✅ Overlapping community detection
 - ✅ Memory-efficient sparse matrix operations
 - ✅ GPU-accelerated BIGCLAM
-- ✅ Comprehensive evaluation metrics (ARI, NMI, Purity, F1)
+- ✅ Adaptive model selection (AIC/BIC based on dataset size)
+- ✅ Comprehensive evaluation metrics (ARI, NMI, Purity, F1, MCC)
 - ✅ Rich visualizations (t-SNE, UMAP, heatmaps, confusion matrices)
 - ✅ Cross-dataset validation
 - ✅ MLP/SVM classification validation
+- ✅ Parameter grid search (144 combinations per dataset)
+- ✅ Baseline comparison (original vs BIGCLAM features)
+- ✅ Computational benchmarking (runtime and memory)
+- ✅ Data augmentation ablation study
+- ✅ Method comparison (BIGCLAM vs K-means, hierarchical, spectral)
+- ✅ Coefficient of variation option for feature selection
 
 **Documentation:**
 - For detailed scientific methodology, parameter selection, and reproducibility details, see [docs/METHODOLOGY.md](docs/METHODOLOGY.md)
@@ -39,7 +46,7 @@ This project implements a modular pipeline for clustering breast cancer subtypes
 
 ## Pipeline Structure
 
-The pipeline consists of **8 modular Python modules** organized in `src/`:
+The pipeline consists of **13 modular Python modules** organized in `src/`:
 
 **Note**: This pipeline expects prepared CSV files (`*_target_added.csv`) to already exist.
 Data preparation is a separate step (see [Data Preparation](#data-preparation) below).
@@ -183,6 +190,115 @@ After running, check:
 - Evaluation/Visualization: ~5 minutes
 - **Total: ~1-2 hours for complete pipeline**
 
+### Additional Validation Analyses
+
+The pipeline includes comprehensive validation analyses to ensure methodological rigor:
+
+#### 1. Baseline Comparison
+Compares classification performance on:
+- **Original data** (no BIGCLAM filtering)
+- **BIGCLAM cluster features only** (using discovered clusters as features)
+- **Combined features** (original + cluster membership)
+
+**Purpose**: Demonstrates whether BIGCLAM actually improves classification performance.
+
+```bash
+python src/analysis/baseline_comparison.py --dataset gse96058_data
+```
+
+**Output**: `results/baseline_comparison/{dataset}_baseline_comparison.csv`
+- Accuracy comparison across feature sets
+- Improvement percentages
+- Training time comparison
+
+#### 2. Computational Benchmarking
+Measures runtime and memory usage for each pipeline step:
+- Preprocessing time and memory
+- Graph construction time and memory
+- BIGCLAM clustering time and memory
+- Total pipeline efficiency
+
+```bash
+python src/analysis/computational_benchmark.py \
+    --dataset gse96058_data \
+    --input_file data/gse96058_data_target_added.csv
+```
+
+**Output**: `results/benchmarks/{dataset}_benchmark.json` and `.csv`
+- Runtime per step (seconds)
+- Memory usage (MB/GB)
+- Peak memory consumption
+
+#### 3. Data Augmentation Ablation Study
+Compares performance with and without data augmentation:
+- **Without augmentation**: Training on original imbalanced data
+- **With augmentation**: Training on balanced augmented data (Gaussian noise injection)
+
+**Purpose**: Validates the impact of augmentation on model performance and justifies the augmentation strategy.
+
+```bash
+python src/analysis/augmentation_ablation.py --dataset gse96058_data
+```
+
+**Output**: `results/augmentation_ablation/{dataset}_augmentation_ablation.csv`
+- Performance difference with/without augmentation
+- Impact on imbalanced classes
+- Justification for augmentation approach
+
+#### 4. Method Comparison
+Compares BIGCLAM with other clustering methods:
+- **K-means**: Fast but may miss overlapping communities
+- **Hierarchical clustering**: Ward linkage, may be slow on large datasets
+- **Spectral clustering**: Memory intensive
+- **BIGCLAM**: Our method, optimized for overlapping communities
+
+**Purpose**: Demonstrates advantages of BIGCLAM for overlapping community detection.
+
+```bash
+python src/analysis/method_comparison.py --dataset gse96058_data --n_clusters 4
+```
+
+**Output**: `results/method_comparison/{dataset}_method_comparison.csv`
+- ARI, NMI, Purity, F1-macro for each method
+- Runtime comparison
+- Advantages of BIGCLAM
+
+#### Run All Validation Analyses
+
+```bash
+# Run all analyses for one dataset
+python run_additional_analyses.py --dataset gse96058_data
+
+# Run for both datasets
+python run_additional_analyses.py --dataset both
+
+# Skip specific analyses
+python run_additional_analyses.py --dataset gse96058_data --skip_benchmark
+```
+
+#### Additional Features
+
+**Coefficient of Variation Option**: 
+The variance filter now supports coefficient of variation (CV = std/mean) to account for low-expressed but highly variable genes:
+```python
+# Enable in preprocessing
+apply_variance_filter(data, threshold="mean", use_coefficient_of_variation=True)
+```
+
+**Error Estimation**: 
+Confusion matrices are computed across multiple runs (n=10) and averaged. Decimal values represent means across runs; final reporting uses rounded integers.
+
+**Feature Types Clarification**:
+- GSE96058: ~20,000 protein-coding genes + ~10,865 non-coding RNAs, pseudogenes
+- TCGA-BRCA: ~20,000 protein-coding genes
+- Common genes after intersection: 19,842
+
+**Results Locations**:
+- `results/baseline_comparison/` - Comparison of original vs BIGCLAM features
+- `results/benchmarks/` - Runtime and memory usage
+- `results/augmentation_ablation/` - Impact of data augmentation
+- `results/method_comparison/` - BIGCLAM vs other clustering methods
+
 ## Module Details
 
 ### Data Preparation (Separate Step)
@@ -198,6 +314,8 @@ After running, check:
 ### 1. `src/preprocessing/data_preprocessing.py`
 - **Log2 transformation**: Handles zeros with `log2(x+1)`
 - **Variance filtering**: Removes low-variance genes (uses mean variance by default)
+  - **Option**: Coefficient of variation (CV = std/mean) to account for low-expressed but variable genes
+  - **Grid search**: Systematic optimization of variance thresholds (144 combinations)
 - **Z-score normalization**: Across samples
 - Outputs: `*_processed.npy` and `*_targets.pkl`
 
@@ -209,7 +327,10 @@ After running, check:
 
 ### 3. `src/clustering/clustering.py`
 - **BIGCLAM**: Overlapping community detection
-- **BIC model selection**: Automatically finds optimal number of communities (tests 1 to max_communities)
+- **Adaptive model selection**: Automatically chooses AIC or BIC based on dataset size
+  - **BIC** for smaller datasets (n < 2000): Stronger penalty, prevents overfitting
+  - **AIC** for larger datasets (n ≥ 2000): Lighter penalty, captures complex patterns
+  - Tests communities from 1 to max_communities, selects optimal
 - **GPU acceleration**: PyTorch implementation
 - Outputs: `*_communities.npy` and `*_membership.npy`
 
@@ -243,12 +364,39 @@ After running, check:
 - **Matching**: Find corresponding clusters across datasets
 - Outputs: Correlation heatmaps, dendrograms
 
-### 9. `src/analysis/parameter_grid_search.py` (New!)
+### 9. `src/analysis/parameter_grid_search.py`
 - **Grid search**: Automatically generates parameter ranges from start/end/step in config.yml
-- **Full pipeline evaluation**: Runs preprocessing → graph → cluster → evaluate for each combination (510 per dataset by default)
+- **Full pipeline evaluation**: Runs preprocessing → graph → cluster → evaluate for each combination (144 per dataset by default)
 - **Paper-ready visualizations**: Generates high-resolution PNG heatmaps and plots
 - **Automated recommendations**: Identifies best parameter configuration based on composite scoring
 - Outputs: `results/grid_search/*.png` visualizations and CSV results
+
+### 10. `src/analysis/baseline_comparison.py`
+- **Baseline validation**: Compares classification performance on original data vs BIGCLAM-filtered data
+- **Feature sets tested**: Original data, cluster-only features, combined (original + clusters)
+- **Classifiers**: SVM and MLP evaluated on each feature set
+- **Purpose**: Demonstrates whether BIGCLAM improves classification performance
+- Outputs: `results/baseline_comparison/{dataset}_baseline_comparison.csv`
+
+### 11. `src/analysis/computational_benchmark.py`
+- **Runtime measurement**: Time per pipeline step (preprocessing, graph construction, clustering)
+- **Memory profiling**: Peak and per-step memory usage (MB/GB)
+- **Efficiency analysis**: Total pipeline time and resource requirements
+- **Purpose**: Provides empirical evidence of computational efficiency
+- Outputs: `results/benchmarks/{dataset}_benchmark.json` and `.csv`
+
+### 12. `src/analysis/augmentation_ablation.py`
+- **Ablation study**: Compares performance with and without data augmentation
+- **Augmentation method**: Gaussian noise injection (σ = 0.1) to balance classes
+- **Impact analysis**: Performance difference, class balance effects
+- **Purpose**: Validates augmentation strategy and quantifies its impact
+- Outputs: `results/augmentation_ablation/{dataset}_augmentation_ablation.csv`
+
+### 13. `src/analysis/method_comparison.py`
+- **Method comparison**: BIGCLAM vs K-means, Hierarchical clustering, Spectral clustering
+- **Metrics evaluated**: ARI, NMI, Purity, F1-macro, Runtime
+- **Purpose**: Demonstrates advantages of BIGCLAM for overlapping community detection
+- Outputs: `results/method_comparison/{dataset}_method_comparison.csv`
 
 ## Expected Results
 
@@ -403,11 +551,23 @@ results/
 ├── classification/
 │   ├── svm_confusion_matrix.png
 │   └── mlp_confusion_matrix.png
-├── grid_search/              # Parameter optimization results (NEW!)
+├── grid_search/              # Parameter optimization results
 │   ├── *_parameter_grid_search.png
 │   ├── *_ari_heatmap.png
 │   ├── *_nmi_heatmap.png
 │   └── *_grid_search_results.csv
+├── baseline_comparison/      # Baseline validation results
+│   ├── *_baseline_comparison.pkl
+│   └── *_baseline_comparison.csv
+├── benchmarks/               # Computational efficiency results
+│   ├── *_benchmark.json
+│   └── *_benchmark.csv
+├── augmentation_ablation/   # Augmentation impact study
+│   ├── *_augmentation_ablation.pkl
+│   └── *_augmentation_ablation.csv
+├── method_comparison/       # Method comparison results
+│   ├── *_method_comparison.pkl
+│   └── *_method_comparison.csv
 └── cross_dataset/
     ├── community_correlations.png
     └── community_dendrogram.png
@@ -426,13 +586,32 @@ results/
 
 **[docs/METHODOLOGY.md](docs/METHODOLOGY.md)** provides comprehensive scientific documentation:
 - **Dataset descriptions**: TCGA-BRCA and GSE96058 with citations and access links
-- **Preprocessing pipeline**: Log2 transformation, variance filtering, z-score normalization
-- **Feature selection**: Variance threshold methods (dynamic "mean" vs fixed values) with sensitivity analysis
+- **Feature types**: Detailed breakdown of ~20,000 protein-coding genes and ~10,865 non-coding RNAs/pseudogenes
+- **Preprocessing pipeline**: Log2 transformation, variance filtering (with CV option), z-score normalization
+- **Feature selection**: Variance threshold methods with grid search optimization (144 combinations)
 - **Graph construction**: Similarity calculation, adjacency matrix construction, threshold selection
-- **BIGCLAM implementation**: Algorithm details, automatic AIC-based model selection, optimization
-- **Classifier specifications**: MLP and SVM architectures and hyperparameters
-- **Evaluation metrics**: Detailed metric calculations and interpretations
-- **Reproducibility**: Random seeds, version information, configuration details
+- **Adaptive model selection**: AIC/BIC selection based on dataset size
+- **Error estimation**: Confusion matrix averaging across multiple runs
+- **Data augmentation**: Gaussian noise injection methodology and impact analysis
+
+### Additional Validation Analyses
+
+**[docs/ADDITIONAL_ANALYSES_SUMMARY.md](docs/ADDITIONAL_ANALYSES_SUMMARY.md)** provides detailed documentation for all validation analyses:
+- Baseline comparison methodology
+- Computational benchmarking procedures
+- Augmentation ablation study design
+- Method comparison framework
+
+**[docs/ANALYSES_RESPONSES.md](docs/ANALYSES_RESPONSES.md)** addresses methodological considerations:
+- Feature selection justification
+- Parameter optimization rationale
+- Validation framework details
+
+**[docs/LITERATURE_UPDATE.md](docs/LITERATURE_UPDATE.md)** contains recent references (2020-2024):
+- Network-based clustering in cancer
+- Recent breast cancer subtyping advances
+- Graph clustering methods
+- Machine learning in cancer genomics
 
 ### Pipeline Structure
 

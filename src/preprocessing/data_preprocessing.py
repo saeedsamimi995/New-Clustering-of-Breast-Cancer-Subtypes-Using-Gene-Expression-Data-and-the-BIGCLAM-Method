@@ -83,9 +83,12 @@ def load_data_with_target(file_path):
     return expression_data, target_labels, gene_names, sample_names
 
 
-def apply_variance_filter(data, threshold="mean"):
+def apply_variance_filter(data, threshold="mean", use_coefficient_of_variation=False):
     """
     Filter features with variance below threshold.
+    
+    Optionally uses coefficient of variation (CV = std/mean) instead of raw variance
+    to account for genes with low expression but high variability.
     
     Args:
         data: numpy array of shape (n_samples, n_features)
@@ -95,6 +98,9 @@ def apply_variance_filter(data, threshold="mean"):
                    - "median": use median variance as threshold
                    - "percentile_X": use Xth percentile as threshold (e.g., "percentile_75" keeps top 25%)
                    - "top_X": keep top X most variable features (e.g., "top_2000")
+        use_coefficient_of_variation: If True, use CV = std/mean instead of raw variance.
+                                      This accounts for low-expressed but highly variable genes
+                                      by normalizing variance by mean expression level.
         
     Returns:
         tuple: (filtered_data, selected_feature_indices)
@@ -104,8 +110,22 @@ def apply_variance_filter(data, threshold="mean"):
         print(f"    [WARNING] Found NaN/Inf in data, cleaning...")
         data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
     
-    # Calculate variance for each feature (axis=0 means across samples)
-    feature_variances = np.var(data, axis=0)
+    # Calculate variance or coefficient of variation for each feature
+    if use_coefficient_of_variation:
+        # Coefficient of Variation: CV = std / mean
+        # This accounts for low-expressed genes with high variability
+        feature_means = np.mean(data, axis=0)
+        feature_stds = np.std(data, axis=0)
+        
+        # Avoid division by zero: use small epsilon for zero means
+        epsilon = 1e-10
+        feature_variances = feature_stds / (np.abs(feature_means) + epsilon)
+        
+        print(f"\n[Variance Filter] Using Coefficient of Variation (CV = std/mean)...")
+        print(f"    This accounts for low-expressed but highly variable genes")
+    else:
+        # Traditional variance
+        feature_variances = np.var(data, axis=0)
     
     # Remove NaN variances (from constant features or invalid data)
     valid_variances = feature_variances[np.isfinite(feature_variances)]

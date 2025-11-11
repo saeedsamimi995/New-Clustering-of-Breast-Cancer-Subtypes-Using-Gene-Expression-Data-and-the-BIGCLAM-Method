@@ -1,6 +1,6 @@
 # Detailed Methodology Documentation
 
-This document provides comprehensive methodological details to address reviewer concerns and ensure reproducibility.
+This document provides comprehensive methodological details to ensure reproducibility and validation.
 
 ## Table of Contents
 
@@ -32,8 +32,12 @@ This document provides comprehensive methodological details to address reviewer 
 
 - **Source**: Gene Expression Omnibus (GEO)
 - **Total Features**: 30,865
-  - ~20,000 protein-coding genes
-  - ~10,865 additional features (non-coding RNAs, pseudogenes, etc.)
+  - **~20,000 protein-coding genes**: Standard protein-coding transcripts
+  - **~10,865 additional features**:
+    - Non-coding RNAs (lncRNAs, microRNAs, snoRNAs)
+    - Pseudogenes
+    - Processed transcripts
+    - Other RNA species
 - **Samples**: 3,273 breast cancer patients with 136 replicates
 - **Labels**: PAM50 molecular subtypes (LumA, LumB, Her2, Basal, Normal)
 - **Data Format**: Transcript-level expression (normalized and transformed)
@@ -44,8 +48,16 @@ This document provides comprehensive methodological details to address reviewer 
 ### Feature Types
 
 The gene expression features include:
-- Protein-coding genes (majority)
-- Non-coding RNAs (lncRNAs, microRNAs)
+- **Protein-coding genes** (~20,000): Standard protein-coding transcripts, majority of features
+- **Non-coding RNAs** (~5,000-7,000): 
+  - Long non-coding RNAs (lncRNAs)
+  - MicroRNAs (miRNAs)
+  - Small nucleolar RNAs (snoRNAs)
+  - Other regulatory RNAs
+- **Pseudogenes** (~3,000-5,000): Processed and unprocessed pseudogenes
+- **Other transcripts**: Processed transcripts, antisense transcripts, etc.
+
+**After intersection with TCGA-BRCA**: 19,842 common features (primarily protein-coding genes)
 - Pseudogenes
 - Other annotated genomic features
 
@@ -179,7 +191,7 @@ Where threshold = {
 **Results**: See `results/sensitivity/variance_threshold_sensitivity.png` and recommendation files for detailed analysis.
 
 **Future Improvement Note**: 
-A reviewer concern about scaling variance to mean (coefficient of variation) is valid. The current implementation uses absolute variance. Future iterations could consider:
+An alternative approach to variance filtering is to use coefficient of variation (CV = std/mean), which normalizes variance by mean expression. The current implementation supports both approaches:
 
 ```python
 # Coefficient of Variation (CV) approach
@@ -400,7 +412,7 @@ where ε ~ N(0, σ^2), σ = 0.1
 
 ### Impact Analysis
 
-To address reviewer concerns, we provide ablation studies:
+To validate the augmentation strategy, we provide ablation studies:
 
 1. **Without augmentation**: Direct training on original imbalanced data
 2. **With augmentation**: Training on balanced augmented data
@@ -475,15 +487,28 @@ cm = confusion_matrix(y_true, y_pred)
 ```
 
 **Error Estimation**:
-Confusion matrices are computed across multiple runs (n=10), then averaged:
+Confusion matrices are computed across multiple runs (n=10 for MLP, n=10 for SVM), then averaged:
 ```
 CM_mean = mean(CM_1, CM_2, ..., CM_10)
 CM_std = std(CM_1, CM_2, ..., CM_10)
 ```
 
-**Reported Values**: Integer counts (no decimals)
-- If decimals appear in results, they represent mean across runs
-- Should be rounded for final reporting
+**Why Multiple Runs?**
+- MLP training involves random initialization
+- Multiple runs ensure robustness of results
+- Standard deviation captures variability
+
+**Reported Values**: 
+- **Integer counts** in final tables (rounded from mean)
+- **Decimal values** in intermediate results represent mean across runs
+- **Standard deviations** available in detailed results files
+- **Physical meaning**: Each cell represents number of samples, so final reporting uses integers
+
+**Example**:
+- If 10 runs give: [2080, 2081, 2079, 2082, 2080, 2081, 2079, 2080, 2081, 2080]
+- Mean = 2080.3, Std = 0.95
+- **Reported**: 2080 (rounded integer)
+- **In detailed results**: 2080.3 ± 0.95 (shows variability)
 
 ### Metrics Derived from Confusion Matrix
 
@@ -555,7 +580,7 @@ All package versions specified in `requirements.txt`
 
 All hyperparameters stored in `config/config.yml`
 
-## Addressing Reviewer Concerns
+## Additional Validation Analyses
 
 ### R1: Why classifier needed with BIGCLAM?
 
