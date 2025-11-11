@@ -86,17 +86,14 @@ def clear_memory():
     gc.collect()  # Call twice to handle cyclic references
 
 
-def run_single_combination(input_file, variance_threshold, similarity_threshold,
+def run_single_combination(preprocessed_data, target_labels, variance_threshold, similarity_threshold,
                           temp_dir, bigclam_config, dataset_name):
     """
     Run full pipeline for a single parameter combination.
     
-    NOTE: input_file must be a prepared CSV file (*_target_added.csv) from data_preparing.py.
-          This file has targets in the last row and is ready for data_preprocessing.py.
-          It does NOT use raw clinical/expression files.
-    
     Args:
-        input_file: Path to prepared CSV file (with _target_added suffix) - NOT raw clinical/expression files
+        preprocessed_data: Preprocessed expression data (after log2 and normalization, before variance filtering)
+        target_labels: Target labels array
         variance_threshold: Numeric variance threshold for feature filtering
         similarity_threshold: Similarity threshold for graph construction
         temp_dir: Temporary directory for intermediate files
@@ -114,22 +111,13 @@ def run_single_combination(input_file, variance_threshold, similarity_threshold,
     }
     
     try:
-        # Step 1: Preprocess with specific variance threshold
-        # input_file is the prepared CSV (*_target_added.csv) - ready for data_preprocessing.py
-        # This starts the pipeline from preprocessing, NOT from data preparation
-        temp_processed_dir = Path(temp_dir) / 'processed'
-        temp_processed_dir.mkdir(parents=True, exist_ok=True)
+        # Step 1: Apply variance filtering (only step that's parameter-dependent)
+        from src.preprocessing.data_preprocessing import apply_variance_filter
         
-        preprocess_result = preprocess_data(
-            input_file,  # This is the prepared CSV with targets, not raw files
-            output_dir=str(temp_processed_dir),
-            variance_threshold=float(variance_threshold),
-            apply_log2=True,
-            apply_normalize=True
+        expression_data, selected_features = apply_variance_filter(
+            preprocessed_data.copy(),  # Copy to avoid modifying original
+            threshold=float(variance_threshold)  # Parameter name is 'threshold', not 'variance_threshold'
         )
-        
-        expression_data = preprocess_result['expression_data']
-        target_labels = preprocess_result['target_labels']
         n_features = expression_data.shape[1]
         
         # Step 2: Build graph with specific similarity threshold
@@ -221,24 +209,25 @@ def run_single_combination(input_file, variance_threshold, similarity_threshold,
             else:
                 results['error'] = 'Evaluation failed - no valid labels'
         
-        # Explicit memory cleanup for large arrays
-        del expression_data, target_labels
+        # Explicit memory cleanup for large arrays (don't delete preprocessed_data or target_labels - they're shared)
+        del expression_data  # This is the variance-filtered copy, safe to delete
         del adjacency, similarity
         del communities, membership
         if 'eval_results' in locals():
             del eval_results
         if 'eval_output' in locals():
             del eval_output
+        if 'selected_features' in locals():
+            del selected_features
             
     except Exception as e:
         results['error'] = str(e)
         print(f"    [ERROR] {e}")
         # Cleanup even on error - try to delete any variables that might exist
+        # (don't delete preprocessed_data or target_labels - they're shared)
         try:
             if 'expression_data' in locals():
                 del expression_data
-            if 'target_labels' in locals():
-                del target_labels
             if 'adjacency' in locals():
                 del adjacency
             if 'similarity' in locals():
@@ -247,6 +236,8 @@ def run_single_combination(input_file, variance_threshold, similarity_threshold,
                 del communities
             if 'membership' in locals():
                 del membership
+            if 'selected_features' in locals():
+                del selected_features
         except:
             pass  # Ignore errors if variables don't exist
     
@@ -260,6 +251,7 @@ def run_grid_search(dataset_name, input_file, variance_range, similarity_range,
                    config_path='config/config.yml', output_dir='results/grid_search'):
     """
     Run grid search over variance and similarity thresholds.
+    Supports resuming from previous runs by checking for existing results.
     
     NOTE: This function starts from data_preprocessing.py. It takes prepared CSV files
           (*_target_added.csv) as input. It does NOT access raw clinical/expression files.
@@ -286,28 +278,147 @@ def run_grid_search(dataset_name, input_file, variance_range, similarity_range,
     
     bigclam_config = config.get('bigclam', {})
     
+    # Check for existing results file for resume functionality
+    results_file = output_dir / f'{dataset_name}_grid_search_results.csv'
+    completed_combinations = set()
+    
+    if results_file.exists():
+        print(f"\n[INFO] Found existing results file: {results_file}")
+        try:
+            existing_df = pd.read_csv(results_file)
+            if len(existing_df) > 0:
+                # Create set of completed combinations (only successful ones - retry failed ones)
+                # Round to 6 decimal places to handle float precision issues
+                for _, row in existing_df.iterrows():
+                    # Only skip if successful - retry failed combinations
+                    if pd.notna(row.get('variance_threshold')) and pd.notna(row.get('similarity_threshold')):
+                        # Check if this combination was successful
+                        is_successful = row.get('success', False)
+                        if is_successful:
+                            var_val = round(float(row['variance_threshold']), 6)
+                            sim_val = round(float(row['similarity_threshold']), 6)
+                            completed_combinations.add((var_val, sim_val))
+                        # If failed, don't add to completed set - we'll retry it
+                print(f"[INFO] Found {len(completed_combinations)} successfully completed combinations")
+                
+                # Count failed combinations that will be retried
+                failed_count = len(existing_df) - len(completed_combinations)
+                if failed_count > 0:
+                    print(f"[INFO] Found {failed_count} failed combinations - will retry them")
+                
+                if len(completed_combinations) > 0:
+                    # Show sample of completed combinations
+                    sample = list(completed_combinations)[:5]
+                    print(f"[INFO] Sample completed: {sample}")
+                    # Show min/max variance and similarity
+                    completed_vars = [var for var, _ in completed_combinations]
+                    completed_sims = [sim for _, sim in completed_combinations]
+                    print(f"[INFO] Completed variance range: {min(completed_vars)} to {max(completed_vars)}")
+                    print(f"[INFO] Completed similarity range: {min(completed_sims)} to {max(completed_sims)}")
+                print(f"[INFO] Will resume from where it left off...")
+                
+                # Only keep successful results - remove failed ones so they can be retried
+                successful_df = existing_df[existing_df.get('success', False) == True]
+                all_results = successful_df.to_dict('records') if len(successful_df) > 0 else []
+            else:
+                all_results = []
+        except Exception as e:
+            print(f"[WARNING] Could not read existing results file: {e}")
+            print(f"[INFO] Starting fresh grid search...")
+            all_results = []
+    else:
+        all_results = []
+    
     print("\n" + "="*80)
     print(f"PARAMETER GRID SEARCH: {dataset_name}")
     print("="*80)
     print(f"\nVariance thresholds: {variance_range}")
     print(f"Similarity thresholds: {similarity_range}")
-    print(f"Total combinations: {len(variance_range) * len(similarity_range)}")
+    total_combinations = len(variance_range) * len(similarity_range)
+    
+    # Count how many from current range are actually completed
+    completed_in_range = 0
+    for var_thresh, sim_thresh in product(variance_range, similarity_range):
+        var_rounded = round(float(var_thresh), 6)
+        sim_rounded = round(float(sim_thresh), 6)
+        if (var_rounded, sim_rounded) in completed_combinations:
+            completed_in_range += 1
+    
+    remaining = total_combinations - completed_in_range
+    
+    # If we have completed combinations, find the minimum variance that was actually used
+    if len(completed_combinations) > 0:
+        completed_variances = [var for var, _ in completed_combinations]
+        min_completed_var = min(completed_variances)
+        max_completed_var = max(completed_variances)
+        print(f"Completed variance range in CSV: {min_completed_var} to {max_completed_var}")
+    
+    print(f"Total combinations in current range: {total_combinations}")
+    print(f"Completed in current range: {completed_in_range}")
+    print(f"Remaining to process: {remaining}")
+    if completed_in_range > 0:
+        print(f"Progress: {completed_in_range/total_combinations*100:.1f}%")
+    
     print("\nThis will take some time...\n")
+    
+    # Load data once before the loop (this is the expensive operation)
+    print("\n[INFO] Loading data once for all combinations...")
+    from src.preprocessing.data_preprocessing import load_data_with_target, apply_log2_transform, apply_zscore_normalize
+    
+    expression_data_raw, target_labels, gene_names, sample_names = load_data_with_target(input_file)
+    
+    # Apply log2 transformation (parameter-independent, do once)
+    print("[INFO] Applying log2 transformation...")
+    expression_data_preprocessed, is_already_normalized = apply_log2_transform(expression_data_raw)
+    
+    # Apply z-score normalization (parameter-independent, do once)
+    if not is_already_normalized:
+        print("[INFO] Applying z-score normalization...")
+        expression_data_preprocessed, _ = apply_zscore_normalize(expression_data_preprocessed)
+    else:
+        print("[INFO] Data already normalized, skipping z-score normalization")
+    
+    print(f"[INFO] Preprocessed data shape: {expression_data_preprocessed.shape}")
+    print(f"[INFO] Data loaded and preprocessed. Starting grid search...\n")
+    
+    # Clean up raw data to save memory
+    del expression_data_raw
+    gc.collect()
     
     # Create temporary directory for intermediate files
     temp_dir = Path(output_dir) / f'temp_{dataset_name}'
     temp_dir.mkdir(parents=True, exist_ok=True)
     
     # Run grid search
-    all_results = []
+    combination_count = 0
     
     for var_thresh, sim_thresh in product(variance_range, similarity_range):
+        # Skip if already completed (round to 6 decimal places for comparison)
+        var_rounded = round(float(var_thresh), 6)
+        sim_rounded = round(float(sim_thresh), 6)
+        
+        # Debug: show first few comparisons
+        if combination_count == 0 and len(completed_combinations) > 0:
+            test_combo = (var_rounded, sim_rounded)
+            is_completed = test_combo in completed_combinations
+            print(f"\n[DEBUG] First combination check: Variance={var_thresh} (rounded={var_rounded}), Similarity={sim_thresh} (rounded={sim_rounded})")
+            print(f"[DEBUG] In completed set? {is_completed}")
+            if not is_completed:
+                sample_completed = list(completed_combinations)[:3]
+                print(f"[DEBUG] Sample completed combinations: {sample_completed}")
+        
+        if (var_rounded, sim_rounded) in completed_combinations:
+            print(f"\n[SKIP] Already completed: Variance={var_thresh}, Similarity={sim_thresh}")
+            continue
+        
+        combination_count += 1
         print(f"\n{'='*80}")
-        print(f"Testing: Variance={var_thresh}, Similarity={sim_thresh}")
+        print(f"Testing [{combination_count}/{remaining}]: Variance={var_thresh}, Similarity={sim_thresh}")
         print(f"{'='*80}")
         
         result = run_single_combination(
-            input_file,
+            expression_data_preprocessed,  # Preprocessed data (log2 + normalized)
+            target_labels,  # Target labels
             var_thresh,
             sim_thresh,
             temp_dir,
@@ -316,6 +427,10 @@ def run_grid_search(dataset_name, input_file, variance_range, similarity_range,
         )
         result['dataset'] = dataset_name
         all_results.append(result)
+        
+        # Save incrementally after each combination to enable resume
+        results_df = pd.DataFrame(all_results)
+        results_df.to_csv(results_file, index=False)
         
         if result['success']:
             print(f"  ✓ Success: {result['n_communities']} communities, ARI={result['ari']:.3f}, NMI={result['nmi']:.3f}")
@@ -332,7 +447,7 @@ def run_grid_search(dataset_name, input_file, variance_range, similarity_range,
         del result
         gc.collect()
     
-    # Convert to DataFrame
+    # Convert to DataFrame (use existing if we resumed)
     results_df = pd.DataFrame(all_results)
     
     # Filter successful runs
@@ -342,8 +457,8 @@ def run_grid_search(dataset_name, input_file, variance_range, similarity_range,
         print("\n[ERROR] No successful runs! Check error messages above.")
         return None
     
-    # Save results
-    results_df.to_csv(output_dir / f'{dataset_name}_grid_search_results.csv', index=False)
+    # Save final results (already saved incrementally, but save again to ensure consistency)
+    results_df.to_csv(results_file, index=False)
     
     # Find best combination
     # Score = weighted combination of metrics
