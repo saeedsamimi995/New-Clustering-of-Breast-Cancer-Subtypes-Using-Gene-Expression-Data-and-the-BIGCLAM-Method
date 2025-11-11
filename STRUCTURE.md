@@ -202,10 +202,7 @@ All parameters are in `config/config.yml`:
 
 ```yaml
 preprocessing:
-  variance_thresholds:
-    tcga_brca_data: "percentile_75"  # Dataset-specific variance thresholds
-    gse96058_data: "percentile_75"
-    default: "mean"
+  variance_threshold_mode: "mean"  # Fixed mean-based filter (three-stage pipeline)
   similarity_thresholds:
     tcga_brca_data: 0.2  # Dataset-specific similarity thresholds
     gse96058_data: 0.6
@@ -213,16 +210,10 @@ preprocessing:
 
 grid_search:  # Parameter grid search ranges (auto-generated from start/end/step)
   tcga:
-    variance_start: 0.5
-    variance_end: 15.0
-    variance_step: 0.5
     similarity_start: 0.1
     similarity_end: 0.9
     similarity_step: 0.05
   gse96058:
-    variance_start: 0.5
-    variance_end: 15.0
-    variance_step: 0.5
     similarity_start: 0.1
     similarity_end: 0.9
     similarity_step: 0.05

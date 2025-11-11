@@ -20,6 +20,8 @@ import sys
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.preprocessing import StandardScaler
 
+from src.feature_selection import run_feature_selection
+
 
 def load_data_with_target(file_path):
     """
@@ -433,8 +435,9 @@ def apply_zscore_normalize(data):
     return data_normalized, scaler
 
 
-def preprocess_data(input_file, output_dir='data/processed', variance_threshold="mean", 
-                   apply_log2=True, apply_normalize=True):
+def preprocess_data(input_file, output_dir='data/processed', variance_threshold="mean",
+                   apply_log2=True, apply_normalize=True, correlation_threshold="mean",
+                   laplacian_neighbors=5, num_selected_features=None):
     """
     Complete preprocessing pipeline.
     
@@ -462,9 +465,26 @@ def preprocess_data(input_file, output_dir='data/processed', variance_threshold=
     else:
         print("\n[Skipping] Log2 transformation")
     
-    # Variance filtering
-    expression_data, selected_features = apply_variance_filter(expression_data, variance_threshold)
-    selected_gene_names = gene_names[selected_features]
+    if variance_threshold != "mean":
+        print("\n[Note] Variance threshold is now fixed to dataset mean; overriding provided value.")
+    variance_threshold = "mean"
+
+    # Advanced feature selection pipeline
+    fs_result = run_feature_selection(
+        expression_data,
+        gene_names=gene_names,
+        variance_threshold=variance_threshold,
+        correlation_threshold=correlation_threshold,
+        laplacian_neighbors=laplacian_neighbors,
+        num_selected_features=num_selected_features,
+        verbose=True
+    )
+    expression_data = fs_result.data
+    selected_features = fs_result.selected_indices
+    selected_gene_names = fs_result.selected_gene_names if fs_result.selected_gene_names is not None else gene_names[selected_features]
+    print("\n[Feature Selection Summary]")
+    for stage, count in fs_result.stage_counts.items():
+        print(f"    {stage}: {count:,} genes")
     
     # Z-score normalization (skip if already normalized)
     if apply_normalize:
@@ -553,8 +573,6 @@ if __name__ == "__main__":
                        help='Input CSV file path (overrides config if provided)')
     parser.add_argument('--output_dir', type=str, default='data/processed', 
                        help='Output directory')
-    parser.add_argument('--variance_threshold', type=str, default=None, 
-                       help='Variance threshold (numeric value or "mean" to use mean variance). Overrides config if provided.')
     parser.add_argument('--no_log2', action='store_true', help='Skip log2 transformation')
     parser.add_argument('--no_normalize', action='store_true', help='Skip z-score normalization')
     
@@ -565,7 +583,6 @@ if __name__ == "__main__":
         preprocess_data(
             args.input,
             args.output_dir,
-            variance_threshold=args.variance_threshold or 'mean',
             apply_log2=not args.no_log2,
             apply_normalize=not args.no_normalize
         )
@@ -585,15 +602,6 @@ if __name__ == "__main__":
     # Get preprocessing parameters from config
     preprocessing_config = config.get('preprocessing', {})
     
-    # Get variance threshold (prefer command line arg, then dataset-specific, then fallback)
-    if args.variance_threshold:
-        variance_threshold = args.variance_threshold
-    else:
-        # Try dataset-specific thresholds first
-        variance_thresholds = preprocessing_config.get('variance_thresholds', {})
-        # Use fallback to single threshold for backwards compatibility
-        variance_threshold = preprocessing_config.get('variance_threshold', 'mean')
-    
     # Extract dataset paths from config
     if 'dataset_preparation' not in config:
         print("Error: 'dataset_preparation' section not found in config file")
@@ -605,9 +613,6 @@ if __name__ == "__main__":
     print("DATA PREPROCESSING")
     print("=" * 80)
     
-    # Get dataset-specific variance thresholds from config
-    variance_thresholds_dict = preprocessing_config.get('variance_thresholds', {})
-    
     # Process TCGA
     if args.dataset in ['tcga', 'both']:
         tcga_config = dataset_config.get('tcga', {})
@@ -616,18 +621,6 @@ if __name__ == "__main__":
         if tcga_output and Path(tcga_output).exists():
             print(f"\n[Processing TCGA BRCA]...")
             print(f"    Input: {tcga_output}")
-            
-            # Determine variance threshold for TCGA
-            if args.variance_threshold:
-                tcga_variance_threshold = args.variance_threshold
-            elif variance_thresholds_dict and 'tcga_brca_data' in variance_thresholds_dict:
-                tcga_variance_threshold = variance_thresholds_dict['tcga_brca_data']
-                print(f"    Using dataset-specific variance threshold: {tcga_variance_threshold}")
-            elif variance_thresholds_dict and 'default' in variance_thresholds_dict:
-                tcga_variance_threshold = variance_thresholds_dict['default']
-                print(f"    Using default variance threshold: {tcga_variance_threshold}")
-            else:
-                tcga_variance_threshold = variance_threshold
             
             # Remove "_target_added" from output name since target is removed from .npy file
             output_base = Path(tcga_output).stem
@@ -639,7 +632,6 @@ if __name__ == "__main__":
             preprocess_data(
                 tcga_output,
                 args.output_dir,
-                variance_threshold=tcga_variance_threshold,
                 apply_log2=not args.no_log2,
                 apply_normalize=not args.no_normalize
             )
@@ -657,18 +649,6 @@ if __name__ == "__main__":
             print(f"\n[Processing GSE96058]...")
             print(f"    Input: {gse_output}")
             
-            # Determine variance threshold for GSE96058
-            if args.variance_threshold:
-                gse_variance_threshold = args.variance_threshold
-            elif variance_thresholds_dict and 'gse96058_data' in variance_thresholds_dict:
-                gse_variance_threshold = variance_thresholds_dict['gse96058_data']
-                print(f"    Using dataset-specific variance threshold: {gse_variance_threshold}")
-            elif variance_thresholds_dict and 'default' in variance_thresholds_dict:
-                gse_variance_threshold = variance_thresholds_dict['default']
-                print(f"    Using default variance threshold: {gse_variance_threshold}")
-            else:
-                gse_variance_threshold = variance_threshold
-            
             # Remove "_target_added" from output name since target is removed from .npy file
             output_base = Path(gse_output).stem
             if output_base.endswith('_target_added'):
@@ -679,7 +659,6 @@ if __name__ == "__main__":
             preprocess_data(
                 gse_output,
                 args.output_dir,
-                variance_threshold=gse_variance_threshold,
                 apply_log2=not args.no_log2,
                 apply_normalize=not args.no_normalize
             )

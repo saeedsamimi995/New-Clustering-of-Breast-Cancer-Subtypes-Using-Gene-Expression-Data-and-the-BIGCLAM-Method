@@ -278,12 +278,10 @@ python run_additional_analyses.py --dataset gse96058_data --skip_benchmark
 
 #### Additional Features
 
-**Coefficient of Variation Option**: 
-The variance filter now supports coefficient of variation (CV = std/mean) to account for low-expressed but highly variable genes:
-```python
-# Enable in preprocessing
-apply_variance_filter(data, threshold="mean", use_coefficient_of_variation=True)
-```
+**Three-Stage Feature Selection**:
+1. **Mean-based variance filter** removes genes with below-average dispersion.
+2. **Correlation pruning** drops redundant genes using mean absolute correlations.
+3. **Laplacian Score** ranks remaining genes using neighborhood structure.
 
 **Error Estimation**: 
 Confusion matrices are computed across multiple runs (n=10) and averaged. Decimal values represent means across runs; final reporting uses rounded integers.
@@ -313,9 +311,10 @@ Confusion matrices are computed across multiple runs (n=10) and averaged. Decima
 
 ### 1. `src/preprocessing/data_preprocessing.py`
 - **Log2 transformation**: Handles zeros with `log2(x+1)`
-- **Variance filtering**: Removes low-variance genes (uses mean variance by default)
-  - **Option**: Coefficient of variation (CV = std/mean) to account for low-expressed but variable genes
-  - **Grid search**: Systematic optimization of variance thresholds (144 combinations)
+- **Three-stage feature selection**:
+  1. Mean-based variance filter (fixed threshold = dataset mean)
+  2. Correlation pruning (mean absolute correlation cutoff)
+  3. Laplacian Score ranking (top-k per grid-search configuration)
 - **Z-score normalization**: Across samples
 - Outputs: `*_processed.npy` and `*_targets.pkl`
 
@@ -364,9 +363,8 @@ Confusion matrices are computed across multiple runs (n=10) and averaged. Decima
 - **Matching**: Find corresponding clusters across datasets
 - Outputs: Correlation heatmaps, dendrograms
 
-### 9. `src/analysis/parameter_grid_search.py`
-- **Grid search**: Automatically generates parameter ranges from start/end/step in config.yml
-- **Full pipeline evaluation**: Runs preprocessing → graph → cluster → evaluate for each combination (144 per dataset by default)
+- **Grid search**: Automatically generates similarity ranges from start/end/step in `config.yml`
+- **Full pipeline evaluation**: Runs preprocessing → graph → cluster → evaluate for each similarity threshold (17 per dataset by default)
 - **Paper-ready visualizations**: Generates high-resolution PNG heatmaps and plots
 - **Automated recommendations**: Identifies best parameter configuration based on composite scoring
 - Outputs: `results/grid_search/*.png` visualizations and CSV results
@@ -437,10 +435,7 @@ Edit `config/config.yml`:
 
 ```yaml
 preprocessing:
-  variance_thresholds:
-    tcga_brca_data: "percentile_75"  # Dataset-specific variance thresholds
-    gse96058_data: "percentile_75"
-    default: "mean"
+  variance_threshold_mode: "mean"  # Fixed mean-based threshold (ignored if changed)
   similarity_thresholds:
     tcga_brca_data: 0.2  # Dataset-specific similarity thresholds
     gse96058_data: 0.6
@@ -448,16 +443,10 @@ preprocessing:
 
 grid_search:  # Parameter grid search ranges (auto-generated from start/end/step)
   tcga:
-    variance_start: 0.5
-    variance_end: 15.0
-    variance_step: 0.5
     similarity_start: 0.1
     similarity_end: 0.9
     similarity_step: 0.05
   gse96058:
-    variance_start: 0.5
-    variance_end: 15.0
-    variance_step: 0.5
     similarity_start: 0.1
     similarity_end: 0.9
     similarity_step: 0.05
@@ -479,26 +468,26 @@ classifiers:
 
 ### Parameter Selection Guide
 
-**Method 1: Grid Search (Recommended for Papers)**
+**Method 1: Similarity Grid Search (Recommended for Papers)**
 
 Use the grid search to test multiple parameter combinations and generate paper-ready visualizations:
 
 ```bash
-# Run grid search (tests all combinations from config)
+# Run grid search (tests all similarity values from config)
 python run_all.py --steps grid_search
 ```
 
 **What it does:**
-- Automatically generates parameter ranges from start/end/step values in config (e.g., variance: 0.5 to 15.0 step 0.5 = 30 values, similarity: 0.1 to 0.9 step 0.05 = 17 values)
-- Tests all combinations of variance and similarity thresholds (total: 510 combinations per dataset)
+- Automatically generates similarity ranges from start/end/step values in config (e.g., 0.1 to 0.9 step 0.05 = 17 values)
+- Tests each similarity threshold with the fixed mean-based variance filter (17 runs per dataset)
 - Runs full pipeline (preprocess → graph → cluster → evaluate) for each combination
-- Generates comprehensive heatmaps and line plots
+- Generates comprehensive similarity profiles and summary plots
 - Recommends best configuration based on ARI, NMI, Purity, and F1 scores
 - Creates paper-ready PNG visualizations (300 DPI)
 
 Results saved to `results/grid_search/`:
-- `{dataset}_parameter_grid_search.png` - Comprehensive visualization
-- `{dataset}_{metric}_heatmap.png` - Individual metric heatmaps
+- `{dataset}_grid_search_overview.png` - Comprehensive similarity summary
+- `{dataset}_{metric}_profile.png` - Individual metric profiles
 - `{dataset}_grid_search_results.csv` - Full results table
 
 **Method 2: Sensitivity Analysis**
@@ -519,12 +508,6 @@ python -m src.analysis.parameter_sensitivity --data data/processed/your_data_pro
 - Saves results in `results/sensitivity/`
 
 **How to choose:**
-
-**Variance Threshold:**
-- **Recommended range**: 5-20 (or use `"mean"` for automatic)
-- **Ideal retention**: 20-40% of features
-- **Too low (<10% retention)**: Removes too many potentially useful features
-- **Too high (>60% retention)**: Keeps too many noisy/low-signal features
 
 **Similarity Threshold:**
 - **Recommended range**: 0.3-0.5
@@ -552,9 +535,9 @@ results/
 │   ├── svm_confusion_matrix.png
 │   └── mlp_confusion_matrix.png
 ├── grid_search/              # Parameter optimization results
-│   ├── *_parameter_grid_search.png
-│   ├── *_ari_heatmap.png
-│   ├── *_nmi_heatmap.png
+│   ├── *_grid_search_overview.png
+│   ├── *_ari_profile.png
+│   ├── *_nmi_profile.png
 │   └── *_grid_search_results.csv
 ├── baseline_comparison/      # Baseline validation results
 │   ├── *_baseline_comparison.pkl
@@ -584,11 +567,10 @@ results/
 
 ### Methodology
 
-**[docs/METHODOLOGY.md](docs/METHODOLOGY.md)** provides comprehensive scientific documentation:
 - **Dataset descriptions**: TCGA-BRCA and GSE96058 with citations and access links
 - **Feature types**: Detailed breakdown of ~20,000 protein-coding genes and ~10,865 non-coding RNAs/pseudogenes
-- **Preprocessing pipeline**: Log2 transformation, variance filtering (with CV option), z-score normalization
-- **Feature selection**: Variance threshold methods with grid search optimization (144 combinations)
+- **Preprocessing pipeline**: Log2 transformation, three-stage feature selection (mean variance filter → correlation pruning → Laplacian Score), z-score normalization
+- **Feature selection**: Mean-based variance filter + correlation pruning + Laplacian Score (fixed threshold, similarity-only grid search)
 - **Graph construction**: Similarity calculation, adjacency matrix construction, threshold selection
 - **Adaptive model selection**: AIC/BIC selection based on dataset size
 - **Error estimation**: Confusion matrix averaging across multiple runs

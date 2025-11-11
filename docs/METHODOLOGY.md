@@ -86,13 +86,16 @@ Where:
 - Log transformation compresses dynamic range
 - Makes data more suitable for downstream statistical analysis
 
-### Step 2: Variance-Based Feature Selection
+### Step 2: Three-Stage Feature Selection
 
-**Purpose**: Remove low-variance features (see [Feature Selection](#feature-selection) section for details).
+**Purpose**: Denoise, de-redundify, and prioritize discriminative genes before graph construction.
 
-**Implementation**: VarianceThreshold filter with dynamic or fixed threshold.
+**Implementation Overview**:
+1. **Mean-based variance filter** (dynamic): Remove genes whose variance is below the dataset-wide mean.
+2. **Correlation pruning**: Compute mean absolute pairwise correlations; drop genes whose correlation exceeds the dataset-wide mean to avoid redundancy.
+3. **Laplacian Score ranking**: Use a k-NN graph (k=5) to compute Laplacian Scores and keep the top genes requested by downstream analyses (or keep all if `num_selected_features=None`).
 
-**Output**: Reduced feature set retaining only informative genes.
+**Output**: Feature matrix with progressively higher signal-to-noise and reduced dimensionality, ready for z-score normalization.
 
 ### Step 3: Z-Score Normalization
 
@@ -120,86 +123,38 @@ This order ensures:
 
 ## Feature Selection
 
-### Variance Threshold Method
+### Stage 1: Mean-Based Variance Filter
 
-**Method**: VarianceThreshold from scikit-learn
+- **Method**: Variance of each gene computed across samples.
+- **Threshold**: Dataset-wide mean variance (computed per run; no user override).
+- **Retain rule**: Keep genes with `Var(gene) ≥ mean(Var(all genes))`.
+- **Outcome**: Removes flat/constant genes while adapting to dataset-specific dispersion.
 
-**Purpose**: Remove low-variance features that contribute little to downstream analysis, reducing noise and computational burden.
+### Stage 2: Correlation Pruning
 
-**Threshold Selection Methods**:
+- **Method**: Compute absolute Pearson correlation for each gene pair on the post-variance data.
+- **Threshold**: Mean absolute correlation across all retained genes.
+- **Retain rule**: Iterative scan; if gene A already kept and |corr(A,B)| exceeds threshold, drop B.
+- **Rationale**: Prevents redundant, highly correlated genes that inflate similarity graphs and BIGCLAM runtimes.
+- **Outputs**: Pruned matrix + list of removed genes for reproducibility.
 
-The pipeline supports two approaches for threshold selection:
+### Stage 3: Laplacian Score Ranking
 
-1. **Dynamic Threshold ("mean")**:
-   - Calculates the mean variance across all features
-   - Uses this mean value as the threshold: `threshold = mean(Var(X_i)) for all i`
-   - Advantages:
-     - Adapts automatically to dataset characteristics
-     - No manual tuning required
-     - Works well across different datasets
-   - Implementation:
-     ```python
-     feature_variances = np.var(data, axis=0)
-     threshold = np.mean(feature_variances)
-     ```
+- **Method**: Build a k-nearest-neighbor graph (k=5 by default) over samples, compute Laplacian Score per gene (lower is better).
+- **Selection**: Sort genes by score; keep top-N (`num_selected_features`) if specified, otherwise keep all passing Stage 2.
+- **Benefits**:
+  - Preserves manifold structure by favoring genes whose variance aligns with neighborhood geometry.
+  - Greedy unsupervised selection that does not require labels (critical before clustering).
 
-2. **Fixed Numeric Threshold**:
-   - User-specified numeric value (e.g., 13)
-   - Requires prior knowledge or sensitivity analysis
-   - Recommended range: 5-20 for typical gene expression data
+### Reporting & Metadata
 
-**Threshold Determination Process**:
+`run_feature_selection` returns:
+- Feature matrix after each stage
+- Gene names retained/removed
+- Threshold values used (variance mean, correlation mean, Laplacian count)
+- Diagnostic metrics (feature counts per stage, Laplacian Scores)
 
-To determine an optimal threshold value, use the sensitivity analysis script:
-
-```bash
-python -m src.analysis.parameter_sensitivity --variance_threshold
-```
-
-This script:
-- Tests threshold values from 5-20 (configurable range)
-- Measures feature retention rates for each threshold
-- Generates visualization plots showing:
-  - Features retained vs threshold (look for "knee" in curve)
-  - Retention rate percentage (ideal: 20-40%)
-  - Variance distribution across features
-- Provides automated recommendations based on:
-  - Retention rate: 20-40% is ideal
-  - Biological signal preservation
-  - Downstream analysis requirements
-
-**Selection Criteria**:
-- **Ideal retention**: 20-40% of features
-- **Too aggressive** (<10% retention): Removes potentially useful features
-- **Too conservative** (>60% retention): Keeps too many noisy/low-signal features
-- **Biological consideration**: Adjust based on expected number of relevant genes
-
-**Equation**:
-```
-Feature i is retained if: Var(X_i) > threshold
-
-Where threshold = {
-    mean(Var(X_j)) for all j, if "mean" specified
-    user_value, if numeric value provided
-}
-```
-
-**Current Configuration**: 
-- Default: `"mean"` (dynamic calculation)
-- Alternative: Numeric value (e.g., `13`) if sensitivity analysis indicates better performance
-
-**Results**: See `results/sensitivity/variance_threshold_sensitivity.png` and recommendation files for detailed analysis.
-
-**Future Improvement Note**: 
-An alternative approach to variance filtering is to use coefficient of variation (CV = std/mean), which normalizes variance by mean expression. The current implementation supports both approaches:
-
-```python
-# Coefficient of Variation (CV) approach
-CV_i = std(X_i) / mean(X_i)
-# Filter features with CV below threshold
-```
-
-This would normalize variance relative to expression level, potentially improving feature selection for highly variable genes.
+These diagnostics feed into grid-search visualizations and Methodology tables so that manuscript tables cite actual retained gene counts.
 
 ## Graph Construction
 

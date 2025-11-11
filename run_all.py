@@ -96,15 +96,9 @@ def main():
             print(f"    Input file (prepared CSV with targets): {tcga_input_file}")
             print(f"    This file will be processed by data_preprocessing.py")
             
-            # Generate ranges from start/end/step
+            # Generate similarity sweep from config (variance is fixed to dataset mean)
             tcga_grid = grid_search_config.get('tcga', {})
-            # Use precise range generation to avoid floating point errors
             from src.analysis.parameter_grid_search import generate_precise_range
-            tcga_var_range = list(generate_precise_range(
-                tcga_grid.get('variance_start', 0.5),
-                tcga_grid.get('variance_end', 15.0),
-                tcga_grid.get('variance_step', 0.5)
-            ))
             tcga_sim_range = list(generate_precise_range(
                 tcga_grid.get('similarity_start', 0.1),
                 tcga_grid.get('similarity_end', 0.9),
@@ -114,7 +108,6 @@ def main():
             run_grid_search(
                 'tcga_brca_data',
                 tcga_input_file,  # This is the prepared CSV, not raw clinical/expression files
-                tcga_var_range,
                 tcga_sim_range,
                 args.config,
                 'results/grid_search'
@@ -142,15 +135,9 @@ def main():
             print(f"    Input file (prepared CSV with targets): {gse_input_file}")
             print(f"    This file will be processed by data_preprocessing.py")
             
-            # Generate ranges from start/end/step
+            # Generate similarity sweep from config (variance is fixed to dataset mean)
             gse_grid = grid_search_config.get('gse96058', {})
-            # Use precise range generation to avoid floating point errors
             from src.analysis.parameter_grid_search import generate_precise_range
-            gse_var_range = list(generate_precise_range(
-                gse_grid.get('variance_start', 0.5),
-                gse_grid.get('variance_end', 15.0),
-                gse_grid.get('variance_step', 0.5)
-            ))
             gse_sim_range = list(generate_precise_range(
                 gse_grid.get('similarity_start', 0.1),
                 gse_grid.get('similarity_end', 0.9),
@@ -160,7 +147,6 @@ def main():
             run_grid_search(
                 'gse96058_data',
                 gse_input_file,  # This is the prepared CSV, not raw clinical/expression files
-                gse_var_range,
                 gse_sim_range,
                 args.config,
                 'results/grid_search'
@@ -188,43 +174,18 @@ def main():
         print("      If files are missing, run data preparation separately.\n")
         
         preprocessing_config = config.get('preprocessing', {})
-        
-        # Use dataset-specific variance thresholds if available, otherwise fallback
-        variance_thresholds = preprocessing_config.get('variance_thresholds', {})
+        print("\nVariance filtering note: threshold is automatically set to the")
+        print("dataset-wide mean; config overrides are ignored after the latest update.")
         
         # Process TCGA BRCA
         tcga_output = config['dataset_preparation']['tcga']['output']
         if Path(tcga_output).exists():
-            # Determine threshold for TCGA
-            if variance_thresholds and 'tcga_brca_data' in variance_thresholds:
-                tcga_threshold = variance_thresholds['tcga_brca_data']
-                print(f"\nUsing dataset-specific variance threshold for TCGA-BRCA: {tcga_threshold}")
-            elif variance_thresholds and 'default' in variance_thresholds:
-                tcga_threshold = variance_thresholds['default']
-                print(f"\nUsing default variance threshold for TCGA-BRCA: {tcga_threshold}")
-            else:
-                tcga_threshold = preprocessing_config.get('variance_threshold', 'mean')
-                print(f"\nUsing fallback variance threshold for TCGA-BRCA: {tcga_threshold}")
-            
-            preprocess_data(tcga_output, output_dir='data/processed', 
-                          variance_threshold=tcga_threshold)
+            preprocess_data(tcga_output, output_dir='data/processed')
         
         # Process GSE96058
         gse_output = config['dataset_preparation']['gse96058']['output']
         if Path(gse_output).exists():
-            # Determine threshold for GSE96058
-            if variance_thresholds and 'gse96058_data' in variance_thresholds:
-                gse_threshold = variance_thresholds['gse96058_data']
-                print(f"\nUsing dataset-specific variance threshold for GSE96058: {gse_threshold}")
-            elif variance_thresholds and 'default' in variance_thresholds:
-                gse_threshold = variance_thresholds['default']
-                print(f"\nUsing default variance threshold for GSE96058: {gse_threshold}")
-            else:
-                gse_threshold = preprocessing_config.get('variance_threshold', 'mean')
-                print(f"\nUsing fallback variance threshold for GSE96058: {gse_threshold}")
-            
-            preprocess_data(gse_output, output_dir='data/processed',
-                          variance_threshold=gse_threshold)
+            preprocess_data(gse_output, output_dir='data/processed')
     
     # Step 2: Graph Construction
     if 'graph' in steps_to_run:

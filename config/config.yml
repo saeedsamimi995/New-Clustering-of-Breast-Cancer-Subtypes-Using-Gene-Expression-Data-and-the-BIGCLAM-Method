@@ -20,14 +20,7 @@ dataset_preparation:
 # Preprocessing parameters
 preprocessing:
   chunk_size: null  # Auto-detect: use 10000 for files >500MB, null for smaller files
-  
-  # Dataset-specific variance thresholds for feature selection (from grid search optimization)
-  # Numeric values specify the variance threshold directly
-  # Options: numeric value (e.g., 1.5), "mean", "median", "percentile_X", "top_X"
-  variance_thresholds:
-    tcga_brca_data: 1.5  # TCGA-BRCA: Optimal from grid search (variance=1.5, similarity=0.15)
-    gse96058_data: 1.0  # GSE96058: Optimal from grid search (variance=1.0, similarity=0.1)
-    default: "mean"  # Fallback: use mean variance if dataset not specified
+  variance_threshold_mode: "mean"  # Fixed after feature-selection refactor; ignored if changed
   
   # Dataset-specific similarity thresholds (optimized via grid search)
   # These ensure fully connected graphs (required for BIGCLAM) with optimal density
@@ -113,16 +106,10 @@ output:
 # Total combinations: 30 × 17 = 510 per dataset
 grid_search:
   tcga:
-    variance_start: 0.5
-    variance_end: 15.0
-    variance_step: 1.0
     similarity_start: 0.1
     similarity_end: 0.9
     similarity_step: 0.1
   gse96058:
-    variance_start: 0.5
-    variance_end: 15.0
-    variance_step: 1.0
     similarity_start: 0.1
     similarity_end: 0.9
     similarity_step: 0.1
