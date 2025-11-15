@@ -278,10 +278,7 @@ python run_additional_analyses.py --dataset gse96058_data --skip_benchmark
 
 #### Additional Features
 
-**Three-Stage Feature Selection**:
-1. **Mean-based variance filter** removes genes with below-average dispersion.
-2. **Correlation pruning** drops redundant genes using mean absolute correlations.
-3. **Laplacian Score** ranks remaining genes using neighborhood structure.
+- **Mean-variance feature selection** runs immediately after loading raw expression values, trimming flat genes before any transformation.
 
 **Error Estimation**: 
 Confusion matrices are computed across multiple runs (n=10) and averaged. Decimal values represent means across runs; final reporting uses rounded integers.
@@ -310,12 +307,9 @@ Confusion matrices are computed across multiple runs (n=10) and averaged. Decima
 **Note**: This step is separate from the main pipeline. The prepared CSV files should already exist in the repository.
 
 ### 1. `src/preprocessing/data_preprocessing.py`
-- **Log2 transformation**: Handles zeros with `log2(x+1)`
-- **Three-stage feature selection**:
-  1. Mean-based variance filter (fixed threshold = dataset mean)
-  2. Correlation pruning (mean absolute correlation cutoff)
-  3. Laplacian Score ranking (top-k per grid-search configuration)
-- **Z-score normalization**: Across samples
+- **Variance filter first**: Raw expression matrices are trimmed using the dataset mean variance *before* any other preprocessing. This drops flat genes while the data are still in their original scale.
+- **Log2 transformation**: Handles zeros with `log2(x+1)` on the reduced matrix.
+- **Z-score normalization**: Across samples (skipped automatically when input already looks normalized)
 - Outputs: `*_processed.npy` and `*_targets.pkl`
 
 ### 2. `src/graph/graph_construction.py`
@@ -569,8 +563,8 @@ results/
 
 - **Dataset descriptions**: TCGA-BRCA and GSE96058 with citations and access links
 - **Feature types**: Detailed breakdown of ~20,000 protein-coding genes and ~10,865 non-coding RNAs/pseudogenes
-- **Preprocessing pipeline**: Log2 transformation, three-stage feature selection (mean variance filter → correlation pruning → Laplacian Score), z-score normalization
-- **Feature selection**: Mean-based variance filter + correlation pruning + Laplacian Score (fixed threshold, similarity-only grid search)
+- **Preprocessing pipeline**: Variance filtering (mean variance), log2 transformation, z-score normalization
+- **Feature selection**: Mean-based variance filter applied globally before any other steps
 - **Graph construction**: Similarity calculation, adjacency matrix construction, threshold selection
 - **Adaptive model selection**: AIC/BIC selection based on dataset size
 - **Error estimation**: Confusion matrix averaging across multiple runs

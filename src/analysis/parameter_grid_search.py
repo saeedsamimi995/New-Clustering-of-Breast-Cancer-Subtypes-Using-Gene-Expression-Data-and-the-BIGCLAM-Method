@@ -24,7 +24,6 @@ from src.preprocessing import preprocess_data
 from src.graph.graph_construction import build_similarity_graph
 from src.clustering.clustering import cluster_data
 from src.evaluation.evaluators import evaluate_clustering
-from src.feature_selection import run_feature_selection
 
 
 def generate_precise_range(start, end, step):
@@ -86,8 +85,20 @@ def clear_memory():
     gc.collect()  # Call twice to handle cyclic references
 
 
-def run_single_combination(preprocessed_data, target_labels, similarity_threshold,
-                          temp_dir, bigclam_config, dataset_name, variance_threshold="mean"):
+def run_single_combination(
+    preprocessed_data,
+    target_labels,
+    similarity_threshold,
+    temp_dir,
+    bigclam_config,
+    dataset_name,
+    original_feature_count,
+    variance_threshold_value,
+    correlation_threshold_value,
+    laplacian_neighbors,
+    requested_feature_count,
+    variance_threshold="mean"
+):
     """
     Run full pipeline for a single parameter combination.
     
@@ -104,27 +115,18 @@ def run_single_combination(preprocessed_data, target_labels, similarity_threshol
         dict: Results including metrics and metadata
     """
     results = {
-        'variance_threshold': None,
+        'variance_threshold': float(variance_threshold_value),
+        'correlation_threshold': float(correlation_threshold_value),
+        'laplacian_neighbors': int(laplacian_neighbors),
+        'requested_features': requested_feature_count,
         'similarity_threshold': similarity_threshold,
         'success': False,
         'error': None
     }
     
     try:
-        # Step 1: Run advanced feature selection (variance + correlation + Laplacian)
-        fs_result = run_feature_selection(
-            preprocessed_data.copy(),
-            gene_names=None,
-            variance_threshold=variance_threshold,
-            correlation_threshold="mean",
-            laplacian_neighbors=5,
-            num_selected_features=None,
-            verbose=False
-        )
-        expression_data = fs_result.data
-        selected_features = fs_result.selected_indices
+        expression_data = preprocessed_data.copy()
         n_features = expression_data.shape[1]
-        results['variance_threshold'] = fs_result.variance_threshold
         
         # Step 2: Build graph with specific similarity threshold
         temp_graph_dir = Path(temp_dir) / 'graphs'
@@ -282,6 +284,12 @@ def run_grid_search(dataset_name, input_file, similarity_range,
         config = yaml.safe_load(f)
     
     bigclam_config = config.get('bigclam', {})
+    preprocessing_config = config.get('preprocessing', {})
+    correlation_threshold_mode = preprocessing_config.get('correlation_threshold_mode', 'mean')
+    laplacian_neighbors_cfg = int(preprocessing_config.get('laplacian_neighbors', 5))
+    num_selected_features_cfg = preprocessing_config.get('num_selected_features', None)
+    if num_selected_features_cfg is not None:
+        num_selected_features_cfg = int(num_selected_features_cfg)
     
     # Check for existing results file for resume functionality
     results_file = output_dir / f'{dataset_name}_grid_search_results.csv'
@@ -348,13 +356,51 @@ def run_grid_search(dataset_name, input_file, similarity_range,
     
     # Load data once before the loop (this is the expensive operation)
     print("\n[INFO] Loading data once for all combinations...")
-    from src.preprocessing.data_preprocessing import load_data_with_target, apply_log2_transform, apply_zscore_normalize
+    from src.preprocessing.data_preprocessing import (
+        load_data_with_target,
+        apply_log2_transform,
+        apply_zscore_normalize,
+        apply_mean_variance_filter,
+        apply_correlation_pruning,
+        apply_laplacian_score_selection
+    )
     
     expression_data_raw, target_labels, gene_names, sample_names = load_data_with_target(input_file)
+    original_feature_count = expression_data_raw.shape[1]
+    
+    print("[INFO] Applying variance filter before preprocessing...")
+    expression_data_var, gene_names_filtered, _, variance_thresh = apply_mean_variance_filter(
+        expression_data_raw,
+        gene_names=gene_names,
+        verbose=True
+    )
+    gene_names = gene_names_filtered if gene_names_filtered is not None else gene_names
+    
+    expression_data_corr, gene_names_corr, _, corr_thresh = apply_correlation_pruning(
+        expression_data_var,
+        gene_names=gene_names,
+        threshold=correlation_threshold_mode,
+        verbose=True
+    )
+    gene_names = gene_names_corr if gene_names_corr is not None else gene_names
+    
+    expression_data_selected, gene_names_selected, lap_indices, lap_scores = apply_laplacian_score_selection(
+        expression_data_corr,
+        gene_names=gene_names,
+        k_neighbors=laplacian_neighbors_cfg,
+        num_features=num_selected_features_cfg,
+        verbose=True
+    )
+    gene_names = gene_names_selected if gene_names_selected is not None else gene_names
+    requested_feature_count = (
+        int(num_selected_features_cfg)
+        if num_selected_features_cfg
+        else int(expression_data_selected.shape[1])
+    )
     
     # Apply log2 transformation (parameter-independent, do once)
     print("[INFO] Applying log2 transformation...")
-    expression_data_preprocessed, is_already_normalized = apply_log2_transform(expression_data_raw)
+    expression_data_preprocessed, is_already_normalized = apply_log2_transform(expression_data_selected)
     
     # Apply z-score normalization (parameter-independent, do once)
     if not is_already_normalized:
@@ -367,7 +413,7 @@ def run_grid_search(dataset_name, input_file, similarity_range,
     print(f"[INFO] Data loaded and preprocessed. Starting grid search...\n")
     
     # Clean up raw data to save memory
-    del expression_data_raw
+    del expression_data_raw, expression_data_var, expression_data_corr, expression_data_selected
     gc.collect()
     
     # Create temporary directory for intermediate files
@@ -395,7 +441,12 @@ def run_grid_search(dataset_name, input_file, similarity_range,
             sim_thresh,
             temp_dir,
             bigclam_config,
-            dataset_name
+            dataset_name,
+            original_feature_count,
+            variance_thresh,
+            corr_thresh,
+            laplacian_neighbors_cfg,
+            requested_feature_count
         )
         result['dataset'] = dataset_name
         all_results.append(result)
@@ -442,7 +493,7 @@ def run_grid_search(dataset_name, input_file, similarity_range,
     )
     
     # Prefer configurations with 4-5 communities (breast cancer subtypes)
-    successful_df['community_bonus'] = 0
+    successful_df['community_bonus'] = 0.0
     successful_df.loc[(successful_df['n_communities'] >= 4) & (successful_df['n_communities'] <= 5), 'community_bonus'] = 0.1
     successful_df['final_score'] = successful_df['composite_score'] + successful_df['community_bonus']
     
@@ -489,16 +540,14 @@ def create_grid_search_visualizations(df, dataset_name, output_dir, best_config)
     """
     output_dir = Path(output_dir)
     
-    agg = df.groupby('similarity_threshold').agg({
-        'ari': 'mean',
-        'nmi': 'mean',
-        'purity': 'mean',
-        'f1_macro': 'mean',
-        'n_features': 'mean',
-        'graph_density': 'mean',
-        'n_communities': 'mean',
-        'optimal_k': 'mean'
-    }).sort_index()
+    df = df.copy()
+    df['similarity_threshold'] = df['similarity_threshold'].astype(float)
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    agg = (
+        df.groupby('similarity_threshold')[numeric_cols]
+        .mean()
+        .sort_index()
+    )
     agg['composite'] = (
         0.4 * agg['ari'] +
         0.3 * agg['nmi'] +
@@ -655,6 +704,9 @@ Graph/Feature Stats:
 def create_individual_heatmaps(df, dataset_name, output_dir, best_config):
     """Create individual high-quality line plots for each metric (paper-ready)."""
     output_dir = Path(output_dir)
+    df = df.copy()
+    df['similarity_threshold'] = df['similarity_threshold'].astype(float)
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     metrics = ['ari', 'nmi', 'purity', 'f1_macro']
     metric_names = [
         'Adjusted Rand Index (ARI)',
@@ -664,7 +716,11 @@ def create_individual_heatmaps(df, dataset_name, output_dir, best_config):
     ]
     palette = ['#d73027', '#fc8d59', '#4575b4', '#1a9850']
     
-    agg = df.groupby('similarity_threshold').mean().sort_index()
+    agg = (
+        df.groupby('similarity_threshold')[numeric_cols]
+        .mean()
+        .sort_index()
+    )
     best_sim = best_config['similarity_threshold']
     
     for metric, metric_name, color in zip(metrics, metric_names, palette):

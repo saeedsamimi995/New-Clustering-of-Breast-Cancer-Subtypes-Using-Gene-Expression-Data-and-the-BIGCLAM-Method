@@ -67,7 +67,23 @@ The gene expression features include:
 
 The preprocessing pipeline consists of sequential steps applied to raw gene expression data:
 
-### Step 1: Log2 Transformation
+### Step 1: Variance Filtering (Pre-Log2)
+
+**Purpose**: Remove extremely low-variance genes before any transformation so downstream steps operate on a denser, higher-signal matrix.
+
+**Implementation**:
+```python
+variances = np.var(X, axis=0)
+threshold = variances.mean()
+keep_mask = variances >= threshold
+X_filtered = X[:, keep_mask]
+```
+
+**Rationale**:
+- Operating on raw values retains the original dynamic range for the variance estimate.
+- Reduces I/O and compute for the rest of the pipeline.
+
+### Step 2: Log2 Transformation
 
 **Purpose**: Normalize expression values to reduce skewness and stabilize variance.
 
@@ -86,17 +102,6 @@ Where:
 - Log transformation compresses dynamic range
 - Makes data more suitable for downstream statistical analysis
 
-### Step 2: Three-Stage Feature Selection
-
-**Purpose**: Denoise, de-redundify, and prioritize discriminative genes before graph construction.
-
-**Implementation Overview**:
-1. **Mean-based variance filter** (dynamic): Remove genes whose variance is below the dataset-wide mean.
-2. **Correlation pruning**: Compute mean absolute pairwise correlations; drop genes whose correlation exceeds the dataset-wide mean to avoid redundancy.
-3. **Laplacian Score ranking**: Use a k-NN graph (k=5) to compute Laplacian Scores and keep the top genes requested by downstream analyses (or keep all if `num_selected_features=None`).
-
-**Output**: Feature matrix with progressively higher signal-to-noise and reduced dimensionality, ready for z-score normalization.
-
 ### Step 3: Z-Score Normalization
 
 **Purpose**: Standardize features to zero mean and unit variance across samples.
@@ -112,14 +117,14 @@ X_normalized = (X - mean(X, axis=0)) / std(X, axis=0)
 - Critical for similarity calculations and machine learning algorithms
 
 **Pipeline Order**:
-1. Log2 transformation
-2. Variance filtering
+1. Variance filtering (raw space)
+2. Log2 transformation
 3. Z-score normalization
 
 This order ensures:
-- Variance calculated on log-transformed data (more meaningful)
-- Normalization applied after feature selection (computational efficiency)
-- Final data ready for graph construction and clustering
+- Downstream steps operate on a reduced, higher-signal matrix
+- Log2 is applied only once, avoiding double transforms on already processed files
+- Normalization is the final step before graph construction
 
 ## Feature Selection
 
@@ -129,32 +134,11 @@ This order ensures:
 - **Threshold**: Dataset-wide mean variance (computed per run; no user override).
 - **Retain rule**: Keep genes with `Var(gene) ≥ mean(Var(all genes))`.
 - **Outcome**: Removes flat/constant genes while adapting to dataset-specific dispersion.
+- **Execution order**: Applied immediately after loading raw counts, *before* log2 or z-score steps, so later preprocessing operates on the reduced matrix.
 
-### Stage 2: Correlation Pruning
+### Stage 2 onward: (Not applied)
 
-- **Method**: Compute absolute Pearson correlation for each gene pair on the post-variance data.
-- **Threshold**: Mean absolute correlation across all retained genes.
-- **Retain rule**: Iterative scan; if gene A already kept and |corr(A,B)| exceeds threshold, drop B.
-- **Rationale**: Prevents redundant, highly correlated genes that inflate similarity graphs and BIGCLAM runtimes.
-- **Outputs**: Pruned matrix + list of removed genes for reproducibility.
-
-### Stage 3: Laplacian Score Ranking
-
-- **Method**: Build a k-nearest-neighbor graph (k=5 by default) over samples, compute Laplacian Score per gene (lower is better).
-- **Selection**: Sort genes by score; keep top-N (`num_selected_features`) if specified, otherwise keep all passing Stage 2.
-- **Benefits**:
-  - Preserves manifold structure by favoring genes whose variance aligns with neighborhood geometry.
-  - Greedy unsupervised selection that does not require labels (critical before clustering).
-
-### Reporting & Metadata
-
-`run_feature_selection` returns:
-- Feature matrix after each stage
-- Gene names retained/removed
-- Threshold values used (variance mean, correlation mean, Laplacian count)
-- Diagnostic metrics (feature counts per stage, Laplacian Scores)
-
-These diagnostics feed into grid-search visualizations and Methodology tables so that manuscript tables cite actual retained gene counts.
+After the variance filter, no additional pruning or ranking is performed. The reduced matrix flows directly into log2/z-score normalization and downstream steps. This keeps the pipeline simple and ensures that every dataset uses the same, reproducible mean-variance heuristic as its sole feature-selection criterion.
 
 ## Graph Construction
 

@@ -17,10 +17,9 @@ import argparse
 import yaml
 import os
 import sys
-from sklearn.feature_selection import VarianceThreshold
 from sklearn.preprocessing import StandardScaler
-
-from src.feature_selection import run_feature_selection
+from sklearn.neighbors import kneighbors_graph
+from scipy.sparse import diags
 
 
 def load_data_with_target(file_path):
@@ -133,105 +132,237 @@ def apply_variance_filter(data, threshold="mean", use_coefficient_of_variation=F
     valid_variances = feature_variances[np.isfinite(feature_variances)]
     
     if len(valid_variances) == 0:
-        print(f"    [ERROR] No valid variances found! Using default threshold of 0.01...")
-        threshold_value = 0.01
-        var_threshold = VarianceThreshold(threshold=threshold_value)
-        data_filtered = var_threshold.fit_transform(data)
-        selected_features = var_threshold.get_support()
-    else:
-        # Handle different threshold types
-        if isinstance(threshold, str):
-            threshold_lower = threshold.lower()
-            
-            if threshold_lower == "mean":
-                threshold_value = np.mean(valid_variances)
-                if not np.isfinite(threshold_value) or threshold_value < 0:
-                    print(f"    [WARNING] Mean variance is invalid, using median instead...")
-                    threshold_value = np.median(valid_variances)
-                print(f"\n[Variance Filter] Using mean variance as threshold...")
-                print(f"    Mean variance: {threshold_value:.4f}")
-                var_threshold = VarianceThreshold(threshold=threshold_value)
-                data_filtered = var_threshold.fit_transform(data)
-                selected_features = var_threshold.get_support()
-                
-            elif threshold_lower == "median":
-                threshold_value = np.median(valid_variances)
-                if not np.isfinite(threshold_value) or threshold_value < 0:
-                    threshold_value = 0.01
-                print(f"\n[Variance Filter] Using median variance as threshold...")
-                print(f"    Median variance: {threshold_value:.4f}")
-                var_threshold = VarianceThreshold(threshold=threshold_value)
-                data_filtered = var_threshold.fit_transform(data)
-                selected_features = var_threshold.get_support()
-                
-            elif threshold_lower.startswith("percentile_"):
-                # Extract percentile value (e.g., "percentile_75" -> 75)
-                try:
-                    percentile = float(threshold_lower.split("_")[1])
-                    threshold_value = np.percentile(valid_variances, percentile)
-                    print(f"\n[Variance Filter] Using {percentile}th percentile as threshold...")
-                    print(f"    Percentile threshold: {threshold_value:.4f}")
-                    print(f"    (Keeps top {100-percentile:.1f}% most variable features)")
-                    var_threshold = VarianceThreshold(threshold=threshold_value)
-                    data_filtered = var_threshold.fit_transform(data)
-                    selected_features = var_threshold.get_support()
-                except (IndexError, ValueError):
-                    print(f"    [ERROR] Invalid percentile format. Use 'percentile_X' (e.g., 'percentile_75')")
-                    threshold_value = np.mean(valid_variances)
-                    var_threshold = VarianceThreshold(threshold=threshold_value)
-                    data_filtered = var_threshold.fit_transform(data)
-                    selected_features = var_threshold.get_support()
-                    
-            elif threshold_lower.startswith("top_"):
-                # Extract number of features (e.g., "top_2000" -> 2000)
-                try:
-                    n_top = int(threshold_lower.split("_")[1])
-                    # Select top N features by variance
-                    top_indices = np.argsort(feature_variances)[::-1][:n_top]
-                    selected_features = np.zeros(len(feature_variances), dtype=bool)
-                    selected_features[top_indices] = True
-                    data_filtered = data[:, selected_features]
-                    print(f"\n[Variance Filter] Keeping top {n_top} most variable features...")
-                except (IndexError, ValueError):
-                    print(f"    [ERROR] Invalid top format. Use 'top_X' (e.g., 'top_2000')")
-                    threshold_value = np.mean(valid_variances)
-                    var_threshold = VarianceThreshold(threshold=threshold_value)
-                    data_filtered = var_threshold.fit_transform(data)
-                    selected_features = var_threshold.get_support()
-            else:
-                # Try to parse as float
-                try:
-                    threshold_value = float(threshold)
-                    print(f"\n[Variance Filter] Threshold={threshold_value}...")
-                    var_threshold = VarianceThreshold(threshold=threshold_value)
-                    data_filtered = var_threshold.fit_transform(data)
-                    selected_features = var_threshold.get_support()
-                except ValueError:
-                    print(f"    [ERROR] Invalid threshold format: {threshold}")
-                    print(f"    Using mean variance as fallback...")
-                    threshold_value = np.mean(valid_variances)
-                    var_threshold = VarianceThreshold(threshold=threshold_value)
-                    data_filtered = var_threshold.fit_transform(data)
-                    selected_features = var_threshold.get_support()
-        else:
-            # Numeric threshold
-            threshold_value = float(threshold)
-            print(f"\n[Variance Filter] Threshold={threshold_value}...")
-            var_threshold = VarianceThreshold(threshold=threshold_value)
-            data_filtered = var_threshold.fit_transform(data)
-            selected_features = var_threshold.get_support()
+        print(f"    [ERROR] No valid variances found! Using default threshold of 0.0...")
+        valid_variances = np.array([0.0])
     
-    n_kept = np.sum(selected_features) if isinstance(selected_features, np.ndarray) else len(selected_features)
+    def mask_from_threshold(value):
+        if not np.isfinite(value):
+            return np.ones_like(feature_variances, dtype=bool)
+        return feature_variances >= value
+    
+    threshold_value = None
+    selected_mask = None
+    
+    if isinstance(threshold, str):
+        threshold_lower = threshold.lower()
+        
+        if threshold_lower == "mean":
+            threshold_value = float(np.mean(valid_variances))
+            if not np.isfinite(threshold_value) or threshold_value < 0:
+                threshold_value = float(np.median(valid_variances))
+            print(f"\n[Variance Filter] Using mean variance as threshold...")
+            print(f"    Mean variance: {threshold_value:.4f}")
+            selected_mask = mask_from_threshold(threshold_value)
+            
+        elif threshold_lower == "median":
+            threshold_value = float(np.median(valid_variances))
+            if not np.isfinite(threshold_value) or threshold_value < 0:
+                threshold_value = 0.0
+            print(f"\n[Variance Filter] Using median variance as threshold...")
+            print(f"    Median variance: {threshold_value:.4f}")
+            selected_mask = mask_from_threshold(threshold_value)
+            
+        elif threshold_lower.startswith("percentile_"):
+            try:
+                percentile = float(threshold_lower.split("_")[1])
+                threshold_value = float(np.percentile(valid_variances, percentile))
+                print(f"\n[Variance Filter] Using {percentile}th percentile as threshold...")
+                print(f"    Percentile threshold: {threshold_value:.4f}")
+                selected_mask = mask_from_threshold(threshold_value)
+            except (IndexError, ValueError):
+                print(f"    [ERROR] Invalid percentile format. Using mean variance instead.")
+                threshold_value = float(np.mean(valid_variances))
+                selected_mask = mask_from_threshold(threshold_value)
+                
+        elif threshold_lower.startswith("top_"):
+            try:
+                n_top = int(threshold_lower.split("_")[1])
+                top_indices = np.argsort(feature_variances)[::-1][:n_top]
+                selected_mask = np.zeros(len(feature_variances), dtype=bool)
+                selected_mask[top_indices] = True
+                print(f"\n[Variance Filter] Keeping top {n_top} most variable features...")
+            except (IndexError, ValueError):
+                print(f"    [ERROR] Invalid top format. Using mean variance instead.")
+                threshold_value = float(np.mean(valid_variances))
+                selected_mask = mask_from_threshold(threshold_value)
+        else:
+            try:
+                threshold_value = float(threshold)
+                print(f"\n[Variance Filter] Threshold={threshold_value}...")
+                selected_mask = mask_from_threshold(threshold_value)
+            except ValueError:
+                print(f"    [ERROR] Invalid threshold format. Using mean variance instead.")
+                threshold_value = float(np.mean(valid_variances))
+                selected_mask = mask_from_threshold(threshold_value)
+    else:
+        threshold_value = float(threshold)
+        print(f"\n[Variance Filter] Threshold={threshold_value}...")
+        selected_mask = mask_from_threshold(threshold_value)
+    
+    if selected_mask is None:
+        selected_mask = np.ones(len(feature_variances), dtype=bool)
+    
+    feature_indices = np.where(selected_mask)[0]
+    if feature_indices.size == 0:
+        print("    [WARNING] No features met the threshold; keeping all features.")
+        feature_indices = np.arange(len(feature_variances))
+        threshold_value = 0.0
+    
+    data_filtered = data[:, feature_indices]
+    n_kept = len(feature_indices)
     n_total = len(feature_variances)
     print(f"    Kept {n_kept:,}/{n_total:,} features ({n_kept/n_total*100:.1f}%)")
     
-    # Convert boolean array to indices if needed
-    if isinstance(selected_features, np.ndarray) and selected_features.dtype == bool:
-        feature_indices = np.where(selected_features)[0]
-    else:
-        feature_indices = selected_features
-    
     return data_filtered, feature_indices
+
+
+def apply_mean_variance_filter(data, gene_names=None, verbose=True):
+    """
+    Convenience helper that applies mean-variance filtering and
+    returns filtered data, corresponding gene names, kept indices,
+    and the threshold that was used.
+    """
+    filtered, indices = apply_variance_filter(
+        data,
+        threshold="mean",
+        use_coefficient_of_variation=False
+    )
+    variances = np.var(data, axis=0)
+    threshold_value = float(np.mean(variances))
+    
+    if verbose:
+        total = data.shape[1]
+        kept = filtered.shape[1]
+        print(
+            f"\n[Variance Filter] Mean threshold={threshold_value:.4f} "
+            f"-> kept {kept:,}/{total:,} genes ({kept/total*100:.1f}%)"
+        )
+    
+    filtered_gene_names = gene_names[indices] if gene_names is not None else None
+    return filtered, filtered_gene_names, indices, threshold_value
+
+
+def apply_correlation_pruning(data, gene_names=None, threshold="mean", verbose=True):
+    """
+    Remove redundant features by pruning highly correlated genes.
+    Keeps a single representative gene from each correlated group.
+    """
+    n_samples, n_features = data.shape
+    if n_features <= 1:
+        return data, gene_names, np.arange(n_features), 0.0
+    
+    print("\n[Correlation Pruning] Computing gene-gene correlation matrix...")
+    corr_matrix = np.corrcoef(data, rowvar=False)
+    corr_matrix = np.nan_to_num(corr_matrix, nan=0.0)
+    abs_corr = np.abs(corr_matrix)
+    np.fill_diagonal(abs_corr, 0.0)
+    
+    upper_tri = abs_corr[np.triu_indices(n_features, k=1)]
+    if upper_tri.size == 0:
+        threshold_value = 0.0
+    else:
+        if isinstance(threshold, str):
+            thresh_lower = threshold.lower()
+            if thresh_lower == "mean":
+                threshold_value = float(np.mean(upper_tri))
+            elif thresh_lower == "median":
+                threshold_value = float(np.median(upper_tri))
+            elif thresh_lower.startswith("percentile_"):
+                try:
+                    percentile = float(thresh_lower.split("_")[1])
+                    threshold_value = float(np.percentile(upper_tri, percentile))
+                except (IndexError, ValueError):
+                    threshold_value = float(np.mean(upper_tri))
+            else:
+                try:
+                    threshold_value = float(threshold)
+                except ValueError:
+                    threshold_value = float(np.mean(upper_tri))
+        else:
+            threshold_value = float(threshold)
+    
+    threshold_value = max(threshold_value, 0.0)
+    print(f"    Threshold (|corr|): {threshold_value:.4f}")
+    
+    visited = np.zeros(n_features, dtype=bool)
+    keep_indices = []
+    
+    for idx in range(n_features):
+        if visited[idx]:
+            continue
+        keep_indices.append(idx)
+        correlated = np.where(abs_corr[idx] >= threshold_value)[0]
+        visited[correlated] = True
+        visited[idx] = True
+    
+    keep_indices = np.array(keep_indices, dtype=int)
+    filtered_data = data[:, keep_indices]
+    filtered_gene_names = gene_names[keep_indices] if gene_names is not None else None
+    
+    if verbose:
+        print(f"    Kept {len(keep_indices):,}/{n_features:,} genes after correlation pruning "
+              f"({len(keep_indices)/n_features*100:.1f}%)")
+    
+    return filtered_data, filtered_gene_names, keep_indices, threshold_value
+
+
+def apply_laplacian_score_selection(
+    data,
+    gene_names=None,
+    k_neighbors=5,
+    num_features=None,
+    verbose=True
+):
+    """
+    Rank genes by Laplacian Score and select top features.
+    """
+    n_samples, n_features = data.shape
+    if n_features == 0:
+        return data, gene_names, np.array([], dtype=int), np.array([])
+    
+    if num_features is None or num_features <= 0 or num_features > n_features:
+        num_features = n_features
+    
+    k = min(max(k_neighbors, 1), max(n_samples - 1, 1))
+    print(f"\n[Laplacian Score] Building {k}-NN graph over {n_samples} samples...")
+    
+    graph = kneighbors_graph(
+        data,
+        n_neighbors=k,
+        mode='distance',
+        include_self=False
+    )
+    # Symmetrize
+    graph = graph.maximum(graph.transpose())
+    degrees = np.array(graph.sum(axis=1)).flatten()
+    degrees[degrees == 0] = 1e-12
+    degree_sum = degrees.sum()
+    
+    L = diags(degrees) - graph
+    
+    scores = np.zeros(n_features, dtype=np.float64)
+    for idx in range(n_features):
+        f = data[:, idx]
+        weighted_mean = np.dot(degrees, f) / degree_sum if degree_sum > 0 else np.mean(f)
+        f_tilde = f - weighted_mean
+        numerator = float(f_tilde @ (L.dot(f_tilde)))
+        denominator = float(np.dot(degrees * f_tilde, f_tilde))
+        if denominator == 0:
+            scores[idx] = np.inf
+        else:
+            scores[idx] = numerator / denominator
+    
+    ranked_indices = np.argsort(scores)
+    selected_indices = ranked_indices[:num_features]
+    
+    filtered_data = data[:, selected_indices]
+    filtered_gene_names = gene_names[selected_indices] if gene_names is not None else None
+    
+    if verbose:
+        print(f"    Selected top {len(selected_indices):,} genes via Laplacian Score "
+              f"(neighbors={k}, features requested={num_features})")
+    
+    return filtered_data, filtered_gene_names, selected_indices, scores
 
 
 def apply_log2_transform(data):
@@ -457,6 +588,39 @@ def preprocess_data(input_file, output_dir='data/processed', variance_threshold=
     
     # Load data
     expression_data, target_labels, gene_names, sample_names = load_data_with_target(input_file)
+    original_gene_count = expression_data.shape[1]
+    
+    if variance_threshold != "mean":
+        print("\n[Note] Variance threshold is now fixed to dataset mean; overriding provided value.")
+    variance_threshold = "mean"
+    
+    # Stage 1: Variance filtering on raw data
+    expression_data, gene_names, variance_indices, variance_thresh = apply_mean_variance_filter(
+        expression_data,
+        gene_names=gene_names,
+        verbose=True
+    )
+    cumulative_indices = variance_indices
+    
+    # Stage 2: Correlation pruning on variance-filtered data
+    expression_data, gene_names, corr_indices, corr_thresh = apply_correlation_pruning(
+        expression_data,
+        gene_names=gene_names,
+        threshold=correlation_threshold,
+        verbose=True
+    )
+    cumulative_indices = cumulative_indices[corr_indices]
+    
+    # Stage 3: Laplacian Score selection
+    expression_data, gene_names, lap_indices, lap_scores = apply_laplacian_score_selection(
+        expression_data,
+        gene_names=gene_names,
+        k_neighbors=laplacian_neighbors,
+        num_features=num_selected_features,
+        verbose=True
+    )
+    cumulative_indices = cumulative_indices[lap_indices]
+    selected_laplacian_scores = lap_scores[lap_indices] if lap_indices.size > 0 else np.array([])
     
     # Log2 transformation (returns data and normalization status)
     is_already_normalized = False
@@ -465,26 +629,15 @@ def preprocess_data(input_file, output_dir='data/processed', variance_threshold=
     else:
         print("\n[Skipping] Log2 transformation")
     
-    if variance_threshold != "mean":
-        print("\n[Note] Variance threshold is now fixed to dataset mean; overriding provided value.")
-    variance_threshold = "mean"
-
-    # Advanced feature selection pipeline
-    fs_result = run_feature_selection(
-        expression_data,
-        gene_names=gene_names,
-        variance_threshold=variance_threshold,
-        correlation_threshold=correlation_threshold,
-        laplacian_neighbors=laplacian_neighbors,
-        num_selected_features=num_selected_features,
-        verbose=True
-    )
-    expression_data = fs_result.data
-    selected_features = fs_result.selected_indices
-    selected_gene_names = fs_result.selected_gene_names if fs_result.selected_gene_names is not None else gene_names[selected_features]
+    # Variance filtering summary (only selection step)
+    selected_features = cumulative_indices
+    selected_gene_names = gene_names
     print("\n[Feature Selection Summary]")
-    for stage, count in fs_result.stage_counts.items():
-        print(f"    {stage}: {count:,} genes")
+    print(f"    initial: {original_gene_count:,} genes")
+    print(f"    variance filter: {len(variance_indices):,} genes (threshold={variance_thresh:.4f})")
+    print(f"    correlation prune: {len(corr_indices):,} genes (threshold={corr_thresh:.4f})")
+    requested = num_selected_features if num_selected_features else 'all'
+    print(f"    laplacian score: {expression_data.shape[1]:,} genes (k={laplacian_neighbors}, requested={requested})")
     
     # Z-score normalization (skip if already normalized)
     if apply_normalize:
@@ -536,7 +689,14 @@ def preprocess_data(input_file, output_dir='data/processed', variance_threshold=
             'target_labels': target_labels,
             'gene_names': selected_gene_names.tolist(),
             'sample_names': sample_names.tolist(),
-            'selected_features': selected_features
+            'selected_features': selected_features.tolist(),
+            'laplacian_scores': selected_laplacian_scores.tolist(),
+            'feature_selection': {
+                'variance_threshold': float(variance_thresh),
+                'correlation_threshold': float(corr_thresh),
+                'laplacian_neighbors': int(laplacian_neighbors),
+                'requested_features': num_selected_features if num_selected_features else None
+            }
         }, f)
     
     print(f"\n[Saving] Processed data to {output_dir}/")
@@ -601,6 +761,9 @@ if __name__ == "__main__":
     
     # Get preprocessing parameters from config
     preprocessing_config = config.get('preprocessing', {})
+    correlation_threshold_mode = preprocessing_config.get('correlation_threshold_mode', 'mean')
+    laplacian_neighbors_cfg = preprocessing_config.get('laplacian_neighbors', 5)
+    num_selected_cfg = preprocessing_config.get('num_selected_features', None)
     
     # Extract dataset paths from config
     if 'dataset_preparation' not in config:
@@ -633,7 +796,10 @@ if __name__ == "__main__":
                 tcga_output,
                 args.output_dir,
                 apply_log2=not args.no_log2,
-                apply_normalize=not args.no_normalize
+                apply_normalize=not args.no_normalize,
+                correlation_threshold=correlation_threshold_mode,
+                laplacian_neighbors=laplacian_neighbors_cfg,
+                num_selected_features=num_selected_cfg
             )
         else:
             print(f"\n⚠ TCGA output file not found. Skipping TCGA preprocessing.")
@@ -660,7 +826,10 @@ if __name__ == "__main__":
                 gse_output,
                 args.output_dir,
                 apply_log2=not args.no_log2,
-                apply_normalize=not args.no_normalize
+                apply_normalize=not args.no_normalize,
+                correlation_threshold=correlation_threshold_mode,
+                laplacian_neighbors=laplacian_neighbors_cfg,
+                num_selected_features=num_selected_cfg
             )
         else:
             print(f"\n⚠ GSE96058 output file not found. Skipping GSE96058 preprocessing.")

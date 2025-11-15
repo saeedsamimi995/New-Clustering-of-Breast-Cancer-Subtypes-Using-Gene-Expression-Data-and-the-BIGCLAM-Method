@@ -21,6 +21,9 @@ dataset_preparation:
 preprocessing:
   chunk_size: null  # Auto-detect: use 10000 for files >500MB, null for smaller files
   variance_threshold_mode: "mean"  # Fixed after feature-selection refactor; ignored if changed
+  correlation_threshold_mode: "mean"
+  laplacian_neighbors: 5
+  num_selected_features: 2000  # Final genes retained after Laplacian ranking
   
   # Dataset-specific similarity thresholds (optimized via grid search)
   # These ensure fully connected graphs (required for BIGCLAM) with optimal density
