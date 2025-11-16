@@ -6,11 +6,6 @@ from .cross_dataset_analysis import (
     compute_cross_dataset_correlation,
     find_matching_communities
 )
-from .parameter_sensitivity import (
-    run_sensitivity_analysis,
-    analyze_variance_threshold_sensitivity,
-    analyze_similarity_threshold_sensitivity
-)
 from .parameter_grid_search import (
     run_grid_search,
     run_single_combination,
@@ -23,9 +18,6 @@ __all__ = [
     'compute_community_centroids',
     'compute_cross_dataset_correlation',
     'find_matching_communities',
-    'run_sensitivity_analysis',
-    'analyze_variance_threshold_sensitivity',
-    'analyze_similarity_threshold_sensitivity',
     'run_grid_search',
     'run_single_combination',
     'create_grid_search_visualizations',

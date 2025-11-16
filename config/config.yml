@@ -28,8 +28,8 @@ preprocessing:
   # Dataset-specific similarity thresholds (optimized via grid search)
   # These ensure fully connected graphs (required for BIGCLAM) with optimal density
   similarity_thresholds:
-    tcga_brca_data: 0.15  # TCGA-BRCA: Optimal from grid search (variance=1.5, similarity=0.15)
-    gse96058_data: 0.1  # GSE96058: Optimal from grid search (variance=1.0, similarity=0.1)
+    tcga_brca_data: 0.1  # TCGA-BRCA: Optimal from grid search (similarity=0.1)
+    gse96058_data: 0.1  # GSE96058: Optimal from grid search (similarity=0.1)
     # Default fallback if dataset not specified
     default: 0.4
   

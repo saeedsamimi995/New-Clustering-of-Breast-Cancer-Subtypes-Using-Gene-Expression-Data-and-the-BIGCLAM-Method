@@ -193,12 +193,21 @@ def main():
         print("STEP 2: GRAPH CONSTRUCTION")
         print("="*80)
         
-        preprocessing_config = config.get('preprocessing', {})
+        # Reload config to ensure we pick up any recent edits on disk
+        graph_config = load_config(args.config)
+        preprocessing_config = graph_config.get('preprocessing', {})
         
         # Use dataset-specific thresholds if available, otherwise fallback to single threshold
         similarity_thresholds = preprocessing_config.get('similarity_thresholds', {})
         if similarity_thresholds:
-            print("Using dataset-specific similarity thresholds:")
+            # Work with a copy and cast to float (handles YAML strings/decimals)
+            similarity_thresholds = {
+                dataset: float(value)
+                for dataset, value in similarity_thresholds.items()
+            }
+        if similarity_thresholds:
+            config_path = Path(args.config).resolve()
+            print(f"Using dataset-specific similarity thresholds (from {config_path}):")
             for dataset, thresh in similarity_thresholds.items():
                 if dataset != 'default':
                     print(f"  {dataset}: {thresh}")

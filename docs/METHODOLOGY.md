@@ -169,17 +169,17 @@ Where:
 
 **Threshold Selection**:
 
-The similarity threshold determines which sample pairs are connected by edges. The optimal threshold is determined through sensitivity analysis:
+The similarity threshold determines which sample pairs are connected by edges. The optimal threshold is determined through the similarity-only grid search:
 
 **Determination Process**:
 
-To find the optimal similarity threshold, use the sensitivity analysis script:
+To find the optimal similarity threshold, run:
 
 ```bash
-python -m src.analysis.parameter_sensitivity --similarity_threshold
+python src/analysis/parameter_grid_search.py --dataset tcga --similarity_range 0.1 0.9 0.05
 ```
 
-This script:
+This routine:
 - Tests threshold values from 0.1 to 0.9 (configurable range)
 - For each threshold, calculates:
   - Number of edges created
@@ -210,8 +210,8 @@ This script:
   - Too high (>20): Many weak connections, noise
 
 **Current Configuration**: 
-- Default: `0.4` (selected based on typical gene expression data characteristics)
-- Can be adjusted based on sensitivity analysis recommendations
+- Defaults come from the latest grid search (see `config.yml`)
+- Re-run the grid search whenever preprocessing or feature-selection logic changes
 
 **Equation**:
 ```
@@ -229,7 +229,7 @@ A_{ji} = A_{ij}  (undirected graph, symmetric matrix)
 - **Sparse**: Most similarity values below threshold, efficient sparse matrix storage
 
 **Distribution Analysis**:
-See `results/sensitivity/similarity_threshold_sensitivity.png` for:
+See `results/grid_search/*_grid_search_overview.png` for:
 - Similarity distribution across all sample pairs
 - Graph statistics at different thresholds
 - Automated threshold recommendations with justifications

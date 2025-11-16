@@ -486,20 +486,20 @@ Results saved to `results/grid_search/`:
 
 **Method 2: Sensitivity Analysis**
 
-Use the sensitivity analysis script for detailed threshold analysis:
+Use the similarity-only grid search for detailed threshold analysis:
 
 ```bash
-# Run sensitivity analysis (auto-detects processed data)
-python -m src.analysis.parameter_sensitivity
+# Run similarity sweep (auto-detects processed data via config)
+python src/analysis/parameter_grid_search.py --dataset tcga
 
-# Or specify data file
-python -m src.analysis.parameter_sensitivity --data data/processed/your_data_processed.npy
+# Or specify a custom range
+python src/analysis/parameter_grid_search.py --dataset tcga --similarity_range 0.1 0.2 0.3
 ```
 
 **What it does:**
-- Tests multiple threshold values and measures their impact
-- Generates plots and recommendations
-- Saves results in `results/sensitivity/`
+- Runs preprocessing → graph → clustering → evaluation for each similarity value
+- Aggregates metrics (ARI, NMI, Purity, F1) and graph stats
+- Saves CSV + publication-grade plots in `results/grid_search/`
 
 **How to choose:**
 
@@ -511,7 +511,7 @@ python -m src.analysis.parameter_sensitivity --data data/processed/your_data_pro
 - **Too low**: Graph too sparse, disconnected components
 - **Too high**: Graph too dense, many weak/noisy connections
 
-The script prints recommendations directly and saves detailed analysis in `results/sensitivity/` with plots and CSV data.
+The script prints recommendations directly and saves detailed analysis in `results/grid_search/` with plots and CSV data.
 
 ## Output Structure
 
