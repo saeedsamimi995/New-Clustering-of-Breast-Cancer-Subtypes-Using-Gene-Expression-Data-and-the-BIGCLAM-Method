@@ -101,13 +101,17 @@ def train_mlp_classifier(X_train, y_train, X_valid, y_valid, X_test, y_test, **p
     y_valid_onehot = oe.transform(y_valid.reshape(-1, 1))
     y_test_onehot = oe.transform(y_test.reshape(-1, 1))
     
-    # Default parameters
+    # Default parameters (handle both 'lr' and 'learning_rate')
     num_runs = params.get('num_runs', 10)
     num_epochs = params.get('num_epochs', 200)
-    lr = params.get('lr', 0.001)
-    hidden_layers = params.get('hidden_layers', (80, 50, 20))
+    lr = params.get('lr', params.get('learning_rate', 0.001))
+    hidden_layers = tuple(params.get('hidden_layers', [80, 50, 20]))  # Convert list to tuple
+    patience = params.get('patience', 10)
+    weight_decay = params.get('weight_decay', 0.0001)
+    dropout_rate = params.get('dropout_rate', 0.3)
     
     print(f"    Parameters: runs={num_runs}, epochs={num_epochs}, lr={lr}")
+    print(f"                hidden_layers={hidden_layers}, dropout={dropout_rate}, weight_decay={weight_decay}")
     
     try:
         results = train_mlp(
@@ -115,7 +119,10 @@ def train_mlp_classifier(X_train, y_train, X_valid, y_valid, X_test, y_test, **p
             num_runs=num_runs,
             num_epochs=num_epochs,
             lr=lr,
-            hidden_layers=hidden_layers
+            hidden_layers=hidden_layers,
+            patience=patience,
+            weight_decay=weight_decay,
+            dropout_rate=dropout_rate
         )
         
         # Get best run results
@@ -289,7 +296,8 @@ def create_classification_plots(svm_results, mlp_results, label_encoder, output_
 def validate_clustering_with_classifiers(processed_dir='data/processed',
                                         clustering_dir='data/clusterings',
                                         output_dir='results/classification',
-                                        mlp_params=None, svm_params=None):
+                                        mlp_params=None, svm_params=None,
+                                        dataset_specific_params=None):
     """
     Validate clustering by training classifiers to predict communities from expression data.
     
@@ -300,8 +308,10 @@ def validate_clustering_with_classifiers(processed_dir='data/processed',
         processed_dir: Directory with processed data
         clustering_dir: Directory with clustering results
         output_dir: Output directory
-        mlp_params: MLP parameters
-        svm_params: SVM parameters
+        mlp_params: Default MLP parameters (used if dataset-specific not provided)
+        svm_params: Default SVM parameters (used if dataset-specific not provided)
+        dataset_specific_params: Dict mapping dataset names to their specific parameters
+                               Format: {dataset_name: {'mlp': {...}, 'svm': {...}}}
     """
     processed_dir = Path(processed_dir)
     clustering_dir = Path(clustering_dir)
@@ -315,11 +325,16 @@ def validate_clustering_with_classifiers(processed_dir='data/processed',
         print(f"No clustering files found in {clustering_dir}")
         return
     
-    # Default parameters
+    # Default parameters (fallback)
+    default_mlp_params = {'num_runs': 10, 'num_epochs': 200, 'lr': 0.001, 'hidden_layers': (80, 50, 20)}
+    default_svm_params = {'kernel': 'rbf', 'C': 0.1, 'gamma': 'scale'}
+    
     if mlp_params is None:
-        mlp_params = {'num_runs': 10, 'num_epochs': 200, 'lr': 0.001, 'hidden_layers': (80, 50, 20)}
+        mlp_params = default_mlp_params
     if svm_params is None:
-        svm_params = {'kernel': 'rbf', 'C': 0.1, 'gamma': 'scale'}
+        svm_params = default_svm_params
+    if dataset_specific_params is None:
+        dataset_specific_params = {}
     
     for clustering_file in clustering_files:
         dataset_name = clustering_file.stem.replace('_communities', '')
@@ -368,21 +383,39 @@ def validate_clustering_with_classifiers(processed_dir='data/processed',
         print(f"    Features (expression): {X.shape}")
         print(f"    Targets (communities): {y.shape}")
         
+        # Get dataset-specific parameters if available
+        if dataset_name in dataset_specific_params:
+            ds_params = dataset_specific_params[dataset_name]
+            dataset_mlp_params = ds_params.get('mlp', mlp_params)
+            dataset_svm_params = ds_params.get('svm', svm_params)
+            print(f"\n[Using dataset-specific parameters for {dataset_name}]")
+            print(f"    MLP: {dataset_mlp_params}")
+            print(f"    SVM: {dataset_svm_params}")
+        else:
+            dataset_mlp_params = mlp_params
+            dataset_svm_params = svm_params
+            print(f"\n[Using default parameters for {dataset_name}]")
+        
+        # Convert MLP params format (handle both 'lr' and 'learning_rate')
+        if 'learning_rate' in dataset_mlp_params and 'lr' not in dataset_mlp_params:
+            dataset_mlp_params = dataset_mlp_params.copy()
+            dataset_mlp_params['lr'] = dataset_mlp_params.pop('learning_rate')
+        
         # Split data
         X_train, X_valid, X_test, y_train, y_valid, y_test = split_data(
             X, y, test_size=0.2, valid_size=0.2
         )
         
-        # Train classifiers
-        svm_results = train_svm(X_train, y_train, X_valid, y_valid, X_test, y_test, **svm_params)
-        mlp_results = train_mlp_classifier(X_train, y_train, X_valid, y_valid, X_test, y_test, **mlp_params)
+        # Train classifiers with dataset-specific parameters
+        svm_results = train_svm(X_train, y_train, X_valid, y_valid, X_test, y_test, **dataset_svm_params)
+        mlp_results = train_mlp_classifier(X_train, y_train, X_valid, y_valid, X_test, y_test, **dataset_mlp_params)
         
         # Add probability predictions for ROC curves
         if svm_results:
             from sklearn.svm import SVC
-            svm_model = SVC(kernel=svm_params.get('kernel', 'rbf'), 
-                           C=svm_params.get('C', 0.1),
-                           gamma=svm_params.get('gamma', 'scale'),
+            svm_model = SVC(kernel=dataset_svm_params.get('kernel', 'rbf'), 
+                           C=dataset_svm_params.get('C', 0.1),
+                           gamma=dataset_svm_params.get('gamma', 'scale'),
                            probability=True, random_state=42)
             svm_model.fit(X_train, y_train)
             svm_results['y_test_proba'] = svm_model.predict_proba(X_test)

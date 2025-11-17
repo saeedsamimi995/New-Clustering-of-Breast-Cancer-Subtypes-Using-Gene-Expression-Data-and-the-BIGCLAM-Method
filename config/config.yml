@@ -29,7 +29,7 @@ preprocessing:
   # These ensure fully connected graphs (required for BIGCLAM) with optimal density
   similarity_thresholds:
     tcga_brca_data: 0.1  # TCGA-BRCA: Optimal from grid search (similarity=0.1)
-    gse96058_data: 0.1  # GSE96058: Optimal from grid search (similarity=0.1)
+    gse96058_data: 0.5  # GSE96058: Optimal from grid search (gives 6 communities, similarity=0.5)
     # Default fallback if dataset not specified
     default: 0.4
   
@@ -66,23 +66,55 @@ bigclam:
     gse96058_data:
       num_restarts: 5  # GSE96058: 5 restarts (same as grid search)
   
-# Classifier parameters
+# Classifier parameters - Dataset-specific configurations for fine-tuning
 classifiers:
-  mlp:
-    num_runs: 10
-    num_epochs: 200
-    learning_rate: 0.001
-    patience: 10
-    weight_decay: 0.0001
-    dropout_rate: 0.3
-    hidden_layers: [80, 50, 20]
+  # Default parameters (used if dataset-specific not provided)
+  default:
+    mlp:
+      num_runs: 10
+      num_epochs: 200
+      learning_rate: 0.001
+      patience: 10
+      weight_decay: 0.0001
+      dropout_rate: 0.3
+      hidden_layers: [80, 50, 20]
+    svm:
+      kernel: "rbf"
+      C: 0.1
+      gamma: "scale"
+      probability: true
   
-  svm:
-    num_runs: 10
-    kernel: "rbf"
-    C: 0.1
-    gamma: "scale"
-    probability: true
+  # Dataset-specific parameters (fine-tuned for each dataset)
+  dataset_specific:
+    tcga_brca_data:
+      mlp:
+        num_runs: 10
+        num_epochs: 200
+        learning_rate: 0.001
+        patience: 10
+        weight_decay: 0.0001
+        dropout_rate: 0.3
+        hidden_layers: [80, 50, 20]  # Adjust based on results
+      svm:
+        kernel: "rbf"
+        C: 0.1  # Adjust based on results (try 0.01, 0.1, 1.0, 10.0)
+        gamma: "scale"  # Or try "auto", 0.001, 0.01, 0.1
+        probability: true
+    
+    gse96058_data:
+      mlp:
+        num_runs: 10
+        num_epochs: 200
+        learning_rate: 0.001
+        patience: 10
+        weight_decay: 0.0001
+        dropout_rate: 0.3
+        hidden_layers: [80, 50, 20]  # Adjust based on results
+      svm:
+        kernel: "rbf"
+        C: 0.1  # Adjust based on results (try 0.01, 0.1, 1.0, 10.0)
+        gamma: "scale"  # Or try "auto", 0.001, 0.01, 0.1
+        probability: true
     
 # Data splitting parameters
 data_splitting:

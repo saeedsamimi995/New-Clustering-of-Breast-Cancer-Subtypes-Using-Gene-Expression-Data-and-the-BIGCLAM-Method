@@ -282,15 +282,42 @@ def main():
         print("STEP 4: CLASSIFICATION VALIDATION")
         print("="*80)
         print("Training SVM and MLP to predict BIGCLAM communities from expression data")
+        print("Using dataset-specific parameters for fine-tuning")
         
         classify_config = config.get('classifiers', {})
-        mlp_params = classify_config.get('mlp', {})
-        svm_params = classify_config.get('svm', {})
+        
+        # Get default parameters
+        default_config = classify_config.get('default', {})
+        default_mlp_params = default_config.get('mlp', {})
+        default_svm_params = default_config.get('svm', {})
+        
+        # Get dataset-specific parameters
+        dataset_specific_config = classify_config.get('dataset_specific', {})
+        dataset_specific_params = {}
+        
+        for dataset_name, ds_config in dataset_specific_config.items():
+            dataset_specific_params[dataset_name] = {
+                'mlp': ds_config.get('mlp', default_mlp_params),
+                'svm': ds_config.get('svm', default_svm_params)
+            }
+        
+        if dataset_specific_params:
+            print("\nDataset-specific classifier configurations:")
+            for dataset, params in dataset_specific_params.items():
+                print(f"  {dataset}:")
+                print(f"    MLP: hidden_layers={params['mlp'].get('hidden_layers', 'N/A')}, "
+                      f"lr={params['mlp'].get('learning_rate', 'N/A')}, "
+                      f"epochs={params['mlp'].get('num_epochs', 'N/A')}")
+                print(f"    SVM: C={params['svm'].get('C', 'N/A')}, "
+                      f"gamma={params['svm'].get('gamma', 'N/A')}, "
+                      f"kernel={params['svm'].get('kernel', 'N/A')}")
         
         validate_clustering_with_classifiers(processed_dir='data/processed',
                                            clustering_dir='data/clusterings',
                                            output_dir='results/classification',
-                                           mlp_params=mlp_params, svm_params=svm_params)
+                                           mlp_params=default_mlp_params,
+                                           svm_params=default_svm_params,
+                                           dataset_specific_params=dataset_specific_params)
     
     # Step 5: Evaluation
     if 'evaluate' in steps_to_run:
