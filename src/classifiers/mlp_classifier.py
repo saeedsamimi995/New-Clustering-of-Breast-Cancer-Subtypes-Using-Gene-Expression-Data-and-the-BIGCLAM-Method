@@ -109,7 +109,8 @@ def calculate_metrics(cm):
 
 def train_and_evaluate(X_train, y_train_onehot, X_valid, y_valid_onehot, X_test, y_test_onehot,
                        num_epochs=200, lr=0.001, min_loss_change=1e-6, weight_decay=1e-4, 
-                       dropout_rate=0.3, hidden_layers=(80, 50, 20), save_path='models/best_mlp_model.pth'):
+                       dropout_rate=0.3, hidden_layers=(80, 50, 20), save_path='models/best_mlp_model.pth',
+                       use_class_weights=True):
     """
     Train and evaluate MLP model with early stopping based on loss change.
     
@@ -124,6 +125,7 @@ def train_and_evaluate(X_train, y_train_onehot, X_valid, y_valid_onehot, X_test,
         dropout_rate (float): Dropout rate.
         hidden_layers (tuple): Sizes of hidden layers.
         save_path (str): Path to save best model.
+        use_class_weights (bool): Whether to use class weights for imbalanced classes.
         
     Returns:
         tuple: Training results including confusion matrices, outputs, and metrics.
@@ -147,7 +149,28 @@ def train_and_evaluate(X_train, y_train_onehot, X_valid, y_valid_onehot, X_test,
     output_size = len(y_train_onehot[0])
 
     model = MLP(input_size, hidden_layers, output_size, dropout_rate=dropout_rate)
-    criterion = nn.CrossEntropyLoss()
+    
+    # Calculate class weights for imbalanced classes
+    if use_class_weights:
+        # Get class frequencies from training labels
+        y_train_labels = np.argmax(y_train_onehot, axis=1)
+        class_counts = np.bincount(y_train_labels, minlength=output_size)
+        total_samples = len(y_train_labels)
+        num_classes = len(class_counts)
+        
+        # Calculate inverse frequency weights (more weight to rare classes)
+        # Add small epsilon to avoid division by zero
+        class_weights = total_samples / (num_classes * class_counts + 1e-6)
+        # Normalize weights
+        class_weights = class_weights / class_weights.sum() * num_classes
+        
+        # Convert to torch tensor
+        class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
+        print(f"    Class weights: {dict(zip(range(num_classes), class_weights.round(3)))}")
+        criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
+    else:
+        criterion = nn.CrossEntropyLoss()
+    
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     # Remove verbose parameter for compatibility with newer PyTorch versions
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
@@ -226,7 +249,8 @@ def train_and_evaluate(X_train, y_train_onehot, X_valid, y_valid_onehot, X_test,
 
 def train_mlp(X_train, y_train_onehot, X_valid, y_valid_onehot, X_test, y_test_onehot,
               num_runs=10, num_epochs=200, lr=0.001, min_loss_change=1e-6, weight_decay=1e-4,
-              dropout_rate=0.3, hidden_layers=(80, 50, 20), models_dir='models'):
+              dropout_rate=0.3, hidden_layers=(80, 50, 20), models_dir='models',
+              use_class_weights=True):
     """
     Train MLP model with multiple runs and return best results.
     
@@ -235,6 +259,7 @@ def train_mlp(X_train, y_train_onehot, X_valid, y_valid_onehot, X_test, y_test_o
         y_train_onehot, y_valid_onehot, y_test_onehot: One-hot encoded labels.
         num_runs (int): Number of training runs.
         min_loss_change (float): Minimum change in validation loss to continue training.
+        use_class_weights (bool): Whether to use class weights for imbalanced classes.
         Other args: Model hyperparameters.
         
     Returns:
@@ -256,7 +281,8 @@ def train_mlp(X_train, y_train_onehot, X_valid, y_valid_onehot, X_test, y_test_o
         train_metrics, valid_metrics, test_metrics = train_and_evaluate(
             X_train, y_train_onehot, X_valid, y_valid_onehot, X_test, y_test_onehot,
             num_epochs=num_epochs, lr=lr, min_loss_change=min_loss_change, weight_decay=weight_decay,
-            dropout_rate=dropout_rate, hidden_layers=hidden_layers, save_path=save_path
+            dropout_rate=dropout_rate, hidden_layers=hidden_layers, save_path=save_path,
+            use_class_weights=use_class_weights
         )
         
         train_cms.append(train_cm)

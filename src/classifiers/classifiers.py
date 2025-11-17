@@ -90,14 +90,45 @@ def train_mlp_classifier(X_train, y_train, X_valid, y_valid, X_test, y_test, **p
     
     print("\n[Training MLP]...")
     
-    # One-hot encode labels
+    # Check if augmentation is enabled
+    use_augmentation = params.get('use_augmentation', True)
+    noise_std = params.get('augmentation_noise_std', 0.1)
+    use_class_weights = params.get('use_class_weights', True)
+    
+    if use_augmentation:
+        print("\n[Augmenting training data to balance classes...]")
+        from src.analysis.augmentation_ablation import augment_data
+        
+        # Show original distribution
+        unique_orig, counts_orig = np.unique(y_train, return_counts=True)
+        print("Original class distribution:")
+        for label, count in zip(unique_orig, counts_orig):
+            print(f"  Class {label}: {count} samples ({count/len(y_train)*100:.1f}%)")
+        
+        # Augment training data
+        X_train_aug, y_train_aug = augment_data(X_train, y_train, noise_std=noise_std)
+        
+        # Show augmented distribution
+        unique_aug, counts_aug = np.unique(y_train_aug, return_counts=True)
+        print("\nAugmented class distribution:")
+        for label, count in zip(unique_aug, counts_aug):
+            print(f"  Class {label}: {count} samples ({count/len(y_train_aug)*100:.1f}%)")
+        
+        # Use augmented data for training
+        X_train_final = X_train_aug
+        y_train_final = y_train_aug
+    else:
+        X_train_final = X_train
+        y_train_final = y_train
+    
+    # One-hot encode labels (use augmented data if augmentation was used)
     # Use sparse_output for newer sklearn versions, fallback to sparse for older versions
     try:
         oe = OneHotEncoder(sparse_output=False)
     except TypeError:
         # Fallback for older sklearn versions
         oe = OneHotEncoder(sparse=False)
-    y_train_onehot = oe.fit_transform(y_train.reshape(-1, 1))
+    y_train_onehot = oe.fit_transform(y_train_final.reshape(-1, 1))
     y_valid_onehot = oe.transform(y_valid.reshape(-1, 1))
     y_test_onehot = oe.transform(y_test.reshape(-1, 1))
     
@@ -110,20 +141,22 @@ def train_mlp_classifier(X_train, y_train, X_valid, y_valid, X_test, y_test, **p
     weight_decay = params.get('weight_decay', 0.0001)
     dropout_rate = params.get('dropout_rate', 0.3)
     
-    print(f"    Parameters: runs={num_runs}, epochs={num_epochs}, lr={lr}")
+    print(f"\n    Parameters: runs={num_runs}, epochs={num_epochs}, lr={lr}")
     print(f"                hidden_layers={hidden_layers}, dropout={dropout_rate}, weight_decay={weight_decay}")
     print(f"                min_loss_change={min_loss_change}")
+    print(f"                use_augmentation={use_augmentation}, use_class_weights={use_class_weights}")
     
     try:
         results = train_mlp(
-            X_train, y_train_onehot, X_valid, y_valid_onehot, X_test, y_test_onehot,
+            X_train_final, y_train_onehot, X_valid, y_valid_onehot, X_test, y_test_onehot,
             num_runs=num_runs,
             num_epochs=num_epochs,
             lr=lr,
             hidden_layers=hidden_layers,
             min_loss_change=min_loss_change,
             weight_decay=weight_decay,
-            dropout_rate=dropout_rate
+            dropout_rate=dropout_rate,
+            use_class_weights=use_class_weights
         )
         
         # Get best run results
@@ -407,18 +440,42 @@ def validate_clustering_with_classifiers(processed_dir='data/processed',
             X, y, test_size=0.2, valid_size=0.2
         )
         
+        # Check if augmentation is enabled for SVM (use same setting as MLP)
+        use_augmentation = dataset_mlp_params.get('use_augmentation', True)
+        noise_std = dataset_mlp_params.get('augmentation_noise_std', 0.1)
+        
+        if use_augmentation:
+            print("\n[Augmenting training data for SVM...]")
+            from src.analysis.augmentation_ablation import augment_data
+            
+            # Augment training data for SVM
+            X_train_svm, y_train_svm = augment_data(X_train, y_train, noise_std=noise_std)
+        else:
+            X_train_svm = X_train
+            y_train_svm = y_train
+        
         # Train classifiers with dataset-specific parameters
-        svm_results = train_svm(X_train, y_train, X_valid, y_valid, X_test, y_test, **dataset_svm_params)
+        svm_results = train_svm(X_train_svm, y_train_svm, X_valid, y_valid, X_test, y_test, **dataset_svm_params)
         mlp_results = train_mlp_classifier(X_train, y_train, X_valid, y_valid, X_test, y_test, **dataset_mlp_params)
         
-        # Add probability predictions for ROC curves
-        if svm_results:
+        # Add probability predictions for ROC curves (use same model from train_svm)
+        if svm_results and 'model' not in svm_results:
+            # If model wasn't returned, create a new one for probabilities
             from sklearn.svm import SVC
+            from sklearn.utils.class_weight import compute_class_weight
+            use_class_weights = dataset_svm_params.get('use_class_weights', True)
+            class_weight = None
+            if use_class_weights:
+                classes = np.unique(y_train_svm)
+                class_weights = compute_class_weight('balanced', classes=classes, y=y_train_svm)
+                class_weight = dict(zip(classes, class_weights))
+            
             svm_model = SVC(kernel=dataset_svm_params.get('kernel', 'rbf'), 
                            C=dataset_svm_params.get('C', 0.1),
                            gamma=dataset_svm_params.get('gamma', 'scale'),
+                           class_weight=class_weight,
                            probability=True, random_state=42)
-            svm_model.fit(X_train, y_train)
+            svm_model.fit(X_train_svm, y_train_svm)
             svm_results['y_test_proba'] = svm_model.predict_proba(X_test)
             svm_results['y_test'] = y_test
         

@@ -12,7 +12,7 @@ def train_svm(X_train, y_train, X_valid, y_valid, X_test, y_test, **params):
     Args:
         X_train, X_valid, X_test: Features
         y_train, y_valid, y_test: Labels
-        params: SVM parameters (kernel, C, gamma, etc.)
+        params: SVM parameters (kernel, C, gamma, class_weight, etc.)
         
     Returns:
         dict: Results including accuracy, F1, confusion matrices
@@ -23,11 +23,22 @@ def train_svm(X_train, y_train, X_valid, y_valid, X_test, y_test, **params):
     kernel = params.get('kernel', 'rbf')
     C = params.get('C', 0.1)
     gamma = params.get('gamma', 'scale')
+    use_class_weights = params.get('use_class_weights', True)
     
-    print(f"    Parameters: kernel={kernel}, C={C}, gamma={gamma}")
+    # Calculate class weights if enabled
+    class_weight = None
+    if use_class_weights:
+        from sklearn.utils.class_weight import compute_class_weight
+        classes = np.unique(y_train)
+        class_weights = compute_class_weight('balanced', classes=classes, y=y_train)
+        class_weight = dict(zip(classes, class_weights))
+        print(f"    Class weights: {class_weight}")
+    
+    print(f"    Parameters: kernel={kernel}, C={C}, gamma={gamma}, class_weight={'balanced' if use_class_weights else 'None'}")
     
     # Train SVM
-    svm = SVC(kernel=kernel, C=C, gamma=gamma, probability=True, random_state=42)
+    svm = SVC(kernel=kernel, C=C, gamma=gamma, probability=True, 
+              class_weight=class_weight, random_state=42)
     svm.fit(X_train, y_train)
     
     # Predictions

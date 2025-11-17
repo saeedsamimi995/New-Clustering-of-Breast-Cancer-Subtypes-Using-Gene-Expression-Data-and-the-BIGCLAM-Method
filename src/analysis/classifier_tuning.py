@@ -51,8 +51,14 @@ def tune_svm_parameters(X_train, y_train, X_valid, y_valid, X_test, y_test,
     best_model = None
     results = []
     
+    # Calculate class weights for balanced training
+    from sklearn.utils.class_weight import compute_class_weight
+    classes = np.unique(y_train)
+    class_weights = compute_class_weight('balanced', classes=classes, y=y_train)
+    class_weight = dict(zip(classes, class_weights))
+    
     for params in ParameterGrid(param_grid):
-        svm = SVC(**params, probability=True, random_state=42)
+        svm = SVC(**params, probability=True, class_weight=class_weight, random_state=42)
         svm.fit(X_train, y_train)
         
         # Evaluate on validation set
@@ -159,19 +165,28 @@ def tune_mlp_parameters(X_train, y_train, X_valid, y_valid, X_test, y_test,
     best_params = None
     results = []
     
+    # Augment training data for balanced classes
+    print("\n[Augmenting training data for balanced classes...]")
+    from src.analysis.augmentation_ablation import augment_data
+    X_train_aug, y_train_aug = augment_data(X_train, y_train, noise_std=0.1)
+    
+    # One-hot encode augmented training data
+    y_train_aug_onehot = oe.fit_transform(y_train_aug.reshape(-1, 1))
+    
     for params in ParameterGrid(param_grid):
         print(f"\n  Testing: {params}")
         
         try:
             mlp_results = train_mlp(
-                X_train, y_train_onehot, X_valid, y_valid_onehot, X_test, y_test_onehot,
+                X_train_aug, y_train_aug_onehot, X_valid, y_valid_onehot, X_test, y_test_onehot,
                 num_runs=3,  # Fewer runs for tuning
                 num_epochs=params.get('num_epochs', 200),
                 lr=params.get('learning_rate', 0.001),
                 hidden_layers=tuple(params.get('hidden_layers', [80, 50, 20])),
                 dropout_rate=params.get('dropout_rate', 0.3),
                 min_loss_change=1e-6,  # Early stop if loss change < 1e-6
-                weight_decay=0.0001
+                weight_decay=0.0001,
+                use_class_weights=True  # Also use class weights
             )
             
             # Get validation accuracy from best run
@@ -263,11 +278,22 @@ def tune_classifiers_for_dataset(dataset_name, processed_dir='data/processed',
     print(f"\nData: {X.shape[0]} samples, {X.shape[1]} features")
     print(f"Communities: {len(set(communities))}")
     
+    # Augment training data for balanced classes (used for both SVM and MLP)
+    print("\n[Augmenting training data for balanced classes...]")
+    from src.analysis.augmentation_ablation import augment_data
+    X_train_aug, y_train_aug = augment_data(X_train, y_train, noise_std=0.1)
+    
+    # Show augmented distribution
+    unique_aug, counts_aug = np.unique(y_train_aug, return_counts=True)
+    print("\nAugmented class distribution:")
+    for label, count in zip(unique_aug, counts_aug):
+        print(f"  Class {label}: {count} samples ({count/len(y_train_aug)*100:.1f}%)")
+    
     # Tune SVM
     print("\n" + "-"*80)
     print("SVM TUNING")
     print("-"*80)
-    svm_results = tune_svm_parameters(X_train, y_train, X_valid, y_valid, X_test, y_test)
+    svm_results = tune_svm_parameters(X_train_aug, y_train_aug, X_valid, y_valid, X_test, y_test)
     
     # Tune MLP
     print("\n" + "-"*80)

@@ -78,11 +78,15 @@ classifiers:
       weight_decay: 0.0001
       dropout_rate: 0.3
       hidden_layers: [80, 50, 20]
+      use_augmentation: true  # Enable data augmentation to balance classes
+      use_class_weights: true  # Enable class weights for imbalanced classes
+      augmentation_noise_std: 0.1  # Standard deviation for Gaussian noise augmentation
     svm:
       kernel: "rbf"
       C: 0.1
       gamma: "scale"
       probability: true
+      use_class_weights: true  # Enable class weights for imbalanced classes
   
   # Dataset-specific parameters (fine-tuned for each dataset)
   dataset_specific:
@@ -95,11 +99,15 @@ classifiers:
         weight_decay: 0.0001
         dropout_rate: 0.3
         hidden_layers: [64, 32, 16]  # Adjust based on results
+        use_augmentation: true  # Enable data augmentation to balance classes
+        use_class_weights: true  # Enable class weights for imbalanced classes
+        augmentation_noise_std: 0.1  # Standard deviation for Gaussian noise augmentation
       svm:
         kernel: "rbf"
         C: 0.1  # Adjust based on results (try 0.01, 0.1, 1.0, 10.0)
         gamma: "scale"  # Or try "auto", 0.001, 0.01, 0.1
         probability: true
+        use_class_weights: true  # Enable class weights for imbalanced classes
     
     gse96058_data:
       mlp:
@@ -110,11 +118,15 @@ classifiers:
         weight_decay: 0.0001
         dropout_rate: 0.3
         hidden_layers: [512, 256, 128, 64, 32, 16]  # Deep architecture for 843 features
+        use_augmentation: true  # Enable data augmentation to balance classes
+        use_class_weights: true  # Enable class weights for imbalanced classes
+        augmentation_noise_std: 0.1  # Standard deviation for Gaussian noise augmentation
       svm:
         kernel: "rbf"
         C: 0.1  # Adjust based on results (try 0.01, 0.1, 1.0, 10.0)
         gamma: "scale"  # Or try "auto", 0.001, 0.01, 0.1
         probability: true
+        use_class_weights: true  # Enable class weights for imbalanced classes
     
 # Data splitting parameters
 data_splitting:
