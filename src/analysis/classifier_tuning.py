@@ -132,7 +132,7 @@ def tune_mlp_parameters(X_train, y_train, X_valid, y_valid, X_test, y_test,
                     [256, 128, 64],               # Alternative medium
                 ],
                 'dropout_rate': [0.2, 0.3, 0.4],
-                'num_epochs': [500, 1000, 2000]
+                'num_epochs': [10000]
             }
         else:
             # Standard architectures for smaller feature spaces (e.g., TCGA)
@@ -146,7 +146,7 @@ def tune_mlp_parameters(X_train, y_train, X_valid, y_valid, X_test, y_test,
                     [128, 64, 32, 16]  # Slightly deeper option
                 ],
                 'dropout_rate': [0.2, 0.3, 0.4],
-                'num_epochs': [500, 1000, 2000]
+                'num_epochs': [10000]
             }
     
     print("\n[Tuning MLP] Grid search over parameters...")
@@ -184,9 +184,15 @@ def tune_mlp_parameters(X_train, y_train, X_valid, y_valid, X_test, y_test,
                 lr=params.get('learning_rate', 0.001),
                 hidden_layers=tuple(params.get('hidden_layers', [80, 50, 20])),
                 dropout_rate=params.get('dropout_rate', 0.3),
-                min_loss_change=1e-6,  # Early stop if loss change < 1e-6
                 weight_decay=0.0001,
-                use_class_weights=True  # Also use class weights
+                use_class_weights=True,  # Also use class weights
+                lr_scheduler_factor=0.8,
+                lr_scheduler_patience=20,
+                lr_scheduler_min_lr=0.001,
+                use_warm_restarts=False,  # Keep ReduceLROnPlateau for tuning
+                warm_restart_T_0=100,
+                warm_restart_T_mult=2,
+                gradient_clip=1.0
             )
             
             # Get validation accuracy from best run

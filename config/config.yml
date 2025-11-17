@@ -72,7 +72,7 @@ classifiers:
   default:
     mlp:
       num_runs: 10
-      num_epochs: 200
+      num_epochs: 10000
       learning_rate: 0.001
       patience: 10
       weight_decay: 0.0001
@@ -81,6 +81,9 @@ classifiers:
       use_augmentation: true  # Enable data augmentation to balance classes
       use_class_weights: true  # Enable class weights for imbalanced classes
       augmentation_noise_std: 0.1  # Standard deviation for Gaussian noise augmentation
+      lr_scheduler_factor: 0.8  # Reduce LR by this factor when plateau (0.8 = 20% reduction)
+      lr_scheduler_patience: 20  # Wait this many epochs before reducing LR
+      lr_scheduler_min_lr: 0.001  # Minimum learning rate (same as initial LR to prevent getting stuck)
     svm:
       kernel: "rbf"
       C: 0.1
@@ -93,7 +96,7 @@ classifiers:
     tcga_brca_data:
       mlp:
         num_runs: 10
-        num_epochs: 200
+        num_epochs: 10000
         learning_rate: 0.001
         patience: 10
         weight_decay: 0.0001
@@ -102,6 +105,13 @@ classifiers:
         use_augmentation: true  # Enable data augmentation to balance classes
         use_class_weights: true  # Enable class weights for imbalanced classes
         augmentation_noise_std: 0.1  # Standard deviation for Gaussian noise augmentation
+        lr_scheduler_factor: 0.8  # Reduce LR by this factor when plateau (0.8 = 20% reduction)
+        lr_scheduler_patience: 20  # Wait this many epochs before reducing LR
+        lr_scheduler_min_lr: 0.001  # Minimum learning rate (same as initial LR to prevent getting stuck)
+        use_warm_restarts: true  # Use cosine annealing with warm restarts to escape local minima
+        warm_restart_T_0: 100  # First restart period (epochs)
+        warm_restart_T_mult: 2  # Multiplier for restart period (doubles each time)
+        gradient_clip: 1.0  # Gradient clipping to help escape local minima (set to 0 to disable)
       svm:
         kernel: "rbf"
         C: 0.1  # Adjust based on results (try 0.01, 0.1, 1.0, 10.0)
@@ -112,7 +122,7 @@ classifiers:
     gse96058_data:
       mlp:
         num_runs: 10
-        num_epochs: 200
+        num_epochs: 10000
         learning_rate: 0.001
         patience: 10
         weight_decay: 0.0001
@@ -121,6 +131,13 @@ classifiers:
         use_augmentation: true  # Enable data augmentation to balance classes
         use_class_weights: true  # Enable class weights for imbalanced classes
         augmentation_noise_std: 0.1  # Standard deviation for Gaussian noise augmentation
+        lr_scheduler_factor: 0.8  # Reduce LR by this factor when plateau (0.8 = 20% reduction)
+        lr_scheduler_patience: 20  # Wait this many epochs before reducing LR
+        lr_scheduler_min_lr: 0.001  # Minimum learning rate (same as initial LR to prevent getting stuck)
+        use_warm_restarts: true  # Use cosine annealing with warm restarts to escape local minima
+        warm_restart_T_0: 100  # First restart period (epochs)
+        warm_restart_T_mult: 2  # Multiplier for restart period (doubles each time)
+        gradient_clip: 1.0  # Gradient clipping to help escape local minima (set to 0 to disable)
       svm:
         kernel: "rbf"
         C: 0.1  # Adjust based on results (try 0.01, 0.1, 1.0, 10.0)

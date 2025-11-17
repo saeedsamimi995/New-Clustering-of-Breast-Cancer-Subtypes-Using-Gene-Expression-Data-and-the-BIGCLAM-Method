@@ -137,14 +137,24 @@ def train_mlp_classifier(X_train, y_train, X_valid, y_valid, X_test, y_test, **p
     num_epochs = params.get('num_epochs', 200)
     lr = params.get('lr', params.get('learning_rate', 0.001))
     hidden_layers = tuple(params.get('hidden_layers', [80, 50, 20]))  # Convert list to tuple
-    min_loss_change = params.get('min_loss_change', 1e-6)
     weight_decay = params.get('weight_decay', 0.0001)
     dropout_rate = params.get('dropout_rate', 0.3)
+    lr_scheduler_factor = params.get('lr_scheduler_factor', 0.8)
+    lr_scheduler_patience = params.get('lr_scheduler_patience', 20)
+    lr_scheduler_min_lr = params.get('lr_scheduler_min_lr', 0.001)
+    use_warm_restarts = params.get('use_warm_restarts', False)
+    warm_restart_T_0 = params.get('warm_restart_T_0', 50)
+    warm_restart_T_mult = params.get('warm_restart_T_mult', 2)
+    gradient_clip = params.get('gradient_clip', 1.0)
     
     print(f"\n    Parameters: runs={num_runs}, epochs={num_epochs}, lr={lr}")
     print(f"                hidden_layers={hidden_layers}, dropout={dropout_rate}, weight_decay={weight_decay}")
-    print(f"                min_loss_change={min_loss_change}")
     print(f"                use_augmentation={use_augmentation}, use_class_weights={use_class_weights}")
+    if use_warm_restarts:
+        print(f"                lr_scheduler: CosineAnnealingWarmRestarts (T_0={warm_restart_T_0}, T_mult={warm_restart_T_mult}, eta_min={lr_scheduler_min_lr})")
+    else:
+        print(f"                lr_scheduler: ReduceLROnPlateau (factor={lr_scheduler_factor}, patience={lr_scheduler_patience}, min_lr={lr_scheduler_min_lr})")
+    print(f"                gradient_clip: {gradient_clip}")
     
     try:
         results = train_mlp(
@@ -153,10 +163,16 @@ def train_mlp_classifier(X_train, y_train, X_valid, y_valid, X_test, y_test, **p
             num_epochs=num_epochs,
             lr=lr,
             hidden_layers=hidden_layers,
-            min_loss_change=min_loss_change,
             weight_decay=weight_decay,
             dropout_rate=dropout_rate,
-            use_class_weights=use_class_weights
+            use_class_weights=use_class_weights,
+            lr_scheduler_factor=lr_scheduler_factor,
+            lr_scheduler_patience=lr_scheduler_patience,
+            lr_scheduler_min_lr=lr_scheduler_min_lr,
+            use_warm_restarts=use_warm_restarts,
+            warm_restart_T_0=warm_restart_T_0,
+            warm_restart_T_mult=warm_restart_T_mult,
+            gradient_clip=gradient_clip
         )
         
         # Get best run results
