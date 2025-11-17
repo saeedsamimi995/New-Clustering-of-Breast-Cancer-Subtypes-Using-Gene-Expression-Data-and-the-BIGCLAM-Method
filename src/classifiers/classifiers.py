@@ -106,12 +106,13 @@ def train_mlp_classifier(X_train, y_train, X_valid, y_valid, X_test, y_test, **p
     num_epochs = params.get('num_epochs', 200)
     lr = params.get('lr', params.get('learning_rate', 0.001))
     hidden_layers = tuple(params.get('hidden_layers', [80, 50, 20]))  # Convert list to tuple
-    patience = params.get('patience', 10)
+    min_loss_change = params.get('min_loss_change', 1e-6)
     weight_decay = params.get('weight_decay', 0.0001)
     dropout_rate = params.get('dropout_rate', 0.3)
     
     print(f"    Parameters: runs={num_runs}, epochs={num_epochs}, lr={lr}")
     print(f"                hidden_layers={hidden_layers}, dropout={dropout_rate}, weight_decay={weight_decay}")
+    print(f"                min_loss_change={min_loss_change}")
     
     try:
         results = train_mlp(
@@ -120,7 +121,7 @@ def train_mlp_classifier(X_train, y_train, X_valid, y_valid, X_test, y_test, **p
             num_epochs=num_epochs,
             lr=lr,
             hidden_layers=hidden_layers,
-            patience=patience,
+            min_loss_change=min_loss_change,
             weight_decay=weight_decay,
             dropout_rate=dropout_rate
         )

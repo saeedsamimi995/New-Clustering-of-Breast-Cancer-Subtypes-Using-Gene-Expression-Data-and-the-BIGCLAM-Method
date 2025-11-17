@@ -92,14 +92,15 @@ def tune_svm_parameters(X_train, y_train, X_valid, y_valid, X_test, y_test,
 
 
 def tune_mlp_parameters(X_train, y_train, X_valid, y_valid, X_test, y_test,
-                        param_grid=None):
+                        param_grid=None, dataset_name=None):
     """
     Tune MLP parameters using grid search on validation set.
     
     Args:
         X_train, X_valid, X_test: Features
         y_train, y_valid, y_test: Labels (will be one-hot encoded)
-        param_grid: Parameter grid to search (default: common values)
+        param_grid: Parameter grid to search (default: dataset-specific values)
+        dataset_name: Name of dataset (for dataset-specific parameter grids)
         
     Returns:
         dict: Best parameters and results
@@ -109,17 +110,38 @@ def tune_mlp_parameters(X_train, y_train, X_valid, y_valid, X_test, y_test,
         return None
     
     if param_grid is None:
-        param_grid = {
-            'learning_rate': [0.0001, 0.001, 0.01],
-            'hidden_layers': [
-                [64, 32],
-                [80, 50, 20],
-                [100, 50],
-                [128, 64, 32]
-            ],
-            'dropout_rate': [0.2, 0.3, 0.4],
-            'num_epochs': [150, 200, 250]
-        }
+        # Determine input size
+        input_size = X_train.shape[1]
+        
+        # Dataset-specific parameter grids
+        if dataset_name == 'gse96058_data' or input_size > 500:
+            # Deep architectures for large feature spaces (e.g., 843 features)
+            param_grid = {
+                'learning_rate': [0.0001, 0.001, 0.01],
+                'hidden_layers': [
+                    [512, 256, 128, 64, 32, 16],  # Deep architecture
+                    [512, 256, 128, 64],          # Medium-deep
+                    [256, 128, 64, 32],           # Medium
+                    [128, 64, 32],                # Shallow
+                    [256, 128, 64],               # Alternative medium
+                ],
+                'dropout_rate': [0.2, 0.3, 0.4],
+                'num_epochs': [500, 1000, 2000]
+            }
+        else:
+            # Standard architectures for smaller feature spaces (e.g., TCGA)
+            param_grid = {
+                'learning_rate': [0.0001, 0.001, 0.01],
+                'hidden_layers': [
+                    [64, 32],
+                    [64, 32, 16],
+                    [100, 50],
+                    [128, 64, 32],
+                    [128, 64, 32, 16]  # Slightly deeper option
+                ],
+                'dropout_rate': [0.2, 0.3, 0.4],
+                'num_epochs': [500, 1000, 2000]
+            }
     
     print("\n[Tuning MLP] Grid search over parameters...")
     print(f"    Parameter combinations: {len(list(ParameterGrid(param_grid)))}")
@@ -148,7 +170,7 @@ def tune_mlp_parameters(X_train, y_train, X_valid, y_valid, X_test, y_test,
                 lr=params.get('learning_rate', 0.001),
                 hidden_layers=tuple(params.get('hidden_layers', [80, 50, 20])),
                 dropout_rate=params.get('dropout_rate', 0.3),
-                patience=10,
+                min_loss_change=1e-6,  # Early stop if loss change < 1e-6
                 weight_decay=0.0001
             )
             
@@ -251,7 +273,8 @@ def tune_classifiers_for_dataset(dataset_name, processed_dir='data/processed',
     print("\n" + "-"*80)
     print("MLP TUNING")
     print("-"*80)
-    mlp_results = tune_mlp_parameters(X_train, y_train, X_valid, y_valid, X_test, y_test)
+    mlp_results = tune_mlp_parameters(X_train, y_train, X_valid, y_valid, X_test, y_test,
+                                     dataset_name=dataset_name)
     
     # Save results
     results = {

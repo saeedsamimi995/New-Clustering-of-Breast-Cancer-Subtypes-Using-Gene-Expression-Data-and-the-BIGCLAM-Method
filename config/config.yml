@@ -94,7 +94,7 @@ classifiers:
         patience: 10
         weight_decay: 0.0001
         dropout_rate: 0.3
-        hidden_layers: [80, 50, 20]  # Adjust based on results
+        hidden_layers: [64, 32, 16]  # Adjust based on results
       svm:
         kernel: "rbf"
         C: 0.1  # Adjust based on results (try 0.01, 0.1, 1.0, 10.0)
@@ -109,7 +109,7 @@ classifiers:
         patience: 10
         weight_decay: 0.0001
         dropout_rate: 0.3
-        hidden_layers: [80, 50, 20]  # Adjust based on results
+        hidden_layers: [512, 256, 128, 64, 32, 16]  # Deep architecture for 843 features
       svm:
         kernel: "rbf"
         C: 0.1  # Adjust based on results (try 0.01, 0.1, 1.0, 10.0)

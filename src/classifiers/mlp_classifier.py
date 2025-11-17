@@ -9,55 +9,63 @@ from sklearn.metrics import confusion_matrix
 
 
 class MLP(nn.Module):
-    """Multi-Layer Perceptron with batch normalization and dropout."""
+    """Multi-Layer Perceptron with batch normalization and dropout.
     
-    def __init__(self, input_size, h1, h2, h3, output_size, dropout_rate=0.3):
+    Supports arbitrary number of hidden layers for flexible architectures.
+    Example: [512, 256, 128, 64, 32, 16] for 6 hidden layers.
+    """
+    
+    def __init__(self, input_size, hidden_layers, output_size, dropout_rate=0.3):
         """
-        Initialize MLP model.
+        Initialize MLP model with dynamic number of hidden layers.
         
         Args:
             input_size (int): Size of input features.
-            h1 (int): Size of first hidden layer.
-            h2 (int): Size of second hidden layer.
-            h3 (int): Size of third hidden layer.
+            hidden_layers (list or tuple): Sizes of hidden layers (supports any number of layers).
+                Example: [512, 256, 128, 64, 32, 16] for 6 hidden layers.
             output_size (int): Number of output classes.
             dropout_rate (float): Dropout rate.
         """
         super(MLP, self).__init__()
-        self.fc1 = nn.Linear(input_size, h1)
-        self.bn1 = nn.BatchNorm1d(h1)
-        self.dropout1 = nn.Dropout(dropout_rate)
+        self.hidden_layers = hidden_layers
+        self.num_hidden = len(hidden_layers)
+        self.dropout_rate = dropout_rate
+        
+        if self.num_hidden == 0:
+            raise ValueError("At least one hidden layer is required")
+        
+        # Create layers dynamically using ModuleList
+        self.fc_layers = nn.ModuleList()
+        self.bn_layers = nn.ModuleList()
+        self.dropout_layers = nn.ModuleList()
+        
+        # Input to first hidden layer
+        self.fc_layers.append(nn.Linear(input_size, hidden_layers[0]))
+        self.bn_layers.append(nn.BatchNorm1d(hidden_layers[0]))
+        self.dropout_layers.append(nn.Dropout(dropout_rate))
+        
+        # Hidden layers (from first to last)
+        for i in range(len(hidden_layers) - 1):
+            self.fc_layers.append(nn.Linear(hidden_layers[i], hidden_layers[i + 1]))
+            self.bn_layers.append(nn.BatchNorm1d(hidden_layers[i + 1]))
+            self.dropout_layers.append(nn.Dropout(dropout_rate))
+        
+        # Output layer (from last hidden layer to output)
+        self.fc_out = nn.Linear(hidden_layers[-1], output_size)
         self.leakyrelu = nn.LeakyReLU()
-
-        self.fc2 = nn.Linear(h1, h2)
-        self.bn2 = nn.BatchNorm1d(h2)
-        self.dropout2 = nn.Dropout(dropout_rate)
-
-        self.fc3 = nn.Linear(h2, h3)
-        self.bn3 = nn.BatchNorm1d(h3)
-        self.dropout3 = nn.Dropout(dropout_rate)
-
-        self.fc4 = nn.Linear(h3, output_size)
         self.softmax = nn.Softmax(dim=1)
 
     def forward(self, x):
-        """Forward pass."""
-        x = self.fc1(x)
-        x = self.bn1(x)
-        x = self.leakyrelu(x)
-        x = self.dropout1(x)
-
-        x = self.fc2(x)
-        x = self.bn2(x)
-        x = self.leakyrelu(x)
-        x = self.dropout2(x)
-
-        x = self.fc3(x)
-        x = self.bn3(x)
-        x = self.leakyrelu(x)
-        x = self.dropout3(x)
-
-        x = self.fc4(x)
+        """Forward pass through all hidden layers."""
+        # Pass through all hidden layers
+        for i in range(len(self.fc_layers)):
+            x = self.fc_layers[i](x)
+            x = self.bn_layers[i](x)
+            x = self.leakyrelu(x)
+            x = self.dropout_layers[i](x)
+        
+        # Output layer
+        x = self.fc_out(x)
         x = self.softmax(x)
         return x
 
@@ -100,17 +108,18 @@ def calculate_metrics(cm):
 
 
 def train_and_evaluate(X_train, y_train_onehot, X_valid, y_valid_onehot, X_test, y_test_onehot,
-                       num_epochs=200, lr=0.001, patience=10, weight_decay=1e-4, 
+                       num_epochs=200, lr=0.001, min_loss_change=1e-6, weight_decay=1e-4, 
                        dropout_rate=0.3, hidden_layers=(80, 50, 20), save_path='models/best_mlp_model.pth'):
     """
-    Train and evaluate MLP model with early stopping.
+    Train and evaluate MLP model with early stopping based on loss change.
     
     Args:
         X_train, X_valid, X_test: Training, validation, and test features.
         y_train_onehot, y_valid_onehot, y_test_onehot: One-hot encoded labels.
         num_epochs (int): Maximum number of training epochs.
         lr (float): Learning rate.
-        patience (int): Early stopping patience.
+        min_loss_change (float): Minimum change in validation loss to continue training.
+            If loss change is less than this value, training stops.
         weight_decay (float): Weight decay for regularization.
         dropout_rate (float): Dropout rate.
         hidden_layers (tuple): Sizes of hidden layers.
@@ -120,16 +129,31 @@ def train_and_evaluate(X_train, y_train_onehot, X_valid, y_valid_onehot, X_test,
         tuple: Training results including confusion matrices, outputs, and metrics.
     """
     input_size = len(X_train[0])
-    h1, h2, h3 = hidden_layers
+    # Ensure hidden_layers is a list/tuple
+    if isinstance(hidden_layers, (list, tuple)):
+        hidden_layers = tuple(hidden_layers)
+    else:
+        raise ValueError(f"hidden_layers must be a list or tuple, got {type(hidden_layers)}")
+    
+    # Validate that we have at least one hidden layer
+    if len(hidden_layers) == 0:
+        raise ValueError("At least one hidden layer is required")
+    
+    # Validate all layer sizes are positive integers
+    for i, size in enumerate(hidden_layers):
+        if not isinstance(size, int) or size <= 0:
+            raise ValueError(f"Hidden layer {i} size must be a positive integer, got {size}")
+    
     output_size = len(y_train_onehot[0])
 
-    model = MLP(input_size, h1, h2, h3, output_size, dropout_rate=dropout_rate)
+    model = MLP(input_size, hidden_layers, output_size, dropout_rate=dropout_rate)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
+    # Remove verbose parameter for compatibility with newer PyTorch versions
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
 
     best_valid_loss = float('inf')
-    patience_counter = 0
+    prev_valid_loss = float('inf')
     train_errors = []
 
     for epoch in range(num_epochs):
@@ -145,22 +169,29 @@ def train_and_evaluate(X_train, y_train_onehot, X_valid, y_valid_onehot, X_test,
         with torch.no_grad():
             valid_outputs = model(torch.tensor(X_valid, dtype=torch.float))
             valid_loss = criterion(valid_outputs, torch.argmax(torch.tensor(y_valid_onehot, dtype=torch.float), dim=1))
+            valid_loss_value = valid_loss.item()
 
-        # Early stopping
-        if valid_loss < best_valid_loss:
-            best_valid_loss = valid_loss
-            patience_counter = 0
+        # Save best model
+        if valid_loss_value < best_valid_loss:
+            best_valid_loss = valid_loss_value
             torch.save(model.state_dict(), save_path)
-        else:
-            patience_counter += 1
+
+        # Early stopping based on loss change
+        loss_change = None
+        if epoch > 0:  # Need at least 2 epochs to compute change
+            loss_change = abs(prev_valid_loss - valid_loss_value)
+            if loss_change < min_loss_change:
+                print(f"Early stopping triggered: loss change ({loss_change:.6f}) < threshold ({min_loss_change})")
+                break
 
         train_errors.append(loss.item())
+        
         if (epoch + 1) % 20 == 0:
-            print(f'Epoch [{epoch + 1}/{num_epochs}], Loss: {loss.item():.4f}, Valid Loss: {valid_loss.item():.4f}')
+            loss_change_str = f"{loss_change:.6f}" if loss_change is not None else "N/A"
+            print(f'Epoch [{epoch + 1}/{num_epochs}], Loss: {loss.item():.4f}, Valid Loss: {valid_loss_value:.4f}, Loss Change: {loss_change_str}')
 
-        if patience_counter >= patience:
-            print("Early stopping triggered.")
-            break
+        # Update previous loss after checking and printing
+        prev_valid_loss = valid_loss_value
 
         scheduler.step(valid_loss)
 
@@ -194,7 +225,7 @@ def train_and_evaluate(X_train, y_train_onehot, X_valid, y_valid_onehot, X_test,
 
 
 def train_mlp(X_train, y_train_onehot, X_valid, y_valid_onehot, X_test, y_test_onehot,
-              num_runs=10, num_epochs=200, lr=0.001, patience=10, weight_decay=1e-4,
+              num_runs=10, num_epochs=200, lr=0.001, min_loss_change=1e-6, weight_decay=1e-4,
               dropout_rate=0.3, hidden_layers=(80, 50, 20), models_dir='models'):
     """
     Train MLP model with multiple runs and return best results.
@@ -203,6 +234,7 @@ def train_mlp(X_train, y_train_onehot, X_valid, y_valid_onehot, X_test, y_test_o
         X_train, X_valid, X_test: Feature matrices.
         y_train_onehot, y_valid_onehot, y_test_onehot: One-hot encoded labels.
         num_runs (int): Number of training runs.
+        min_loss_change (float): Minimum change in validation loss to continue training.
         Other args: Model hyperparameters.
         
     Returns:
@@ -223,7 +255,7 @@ def train_mlp(X_train, y_train_onehot, X_valid, y_valid_onehot, X_test, y_test_o
         train_cm, valid_cm, test_cm, train_errors, train_outputs, valid_outputs, test_outputs, \
         train_metrics, valid_metrics, test_metrics = train_and_evaluate(
             X_train, y_train_onehot, X_valid, y_valid_onehot, X_test, y_test_onehot,
-            num_epochs=num_epochs, lr=lr, patience=patience, weight_decay=weight_decay,
+            num_epochs=num_epochs, lr=lr, min_loss_change=min_loss_change, weight_decay=weight_decay,
             dropout_rate=dropout_rate, hidden_layers=hidden_layers, save_path=save_path
         )
         
