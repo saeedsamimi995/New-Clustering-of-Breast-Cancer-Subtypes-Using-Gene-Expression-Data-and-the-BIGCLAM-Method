@@ -123,7 +123,7 @@ def tune_mlp_parameters(X_train, y_train, X_valid, y_valid, X_test, y_test,
         if dataset_name == 'gse96058_data' or input_size > 500:
             # Deep architectures for large feature spaces (e.g., 843 features)
             param_grid = {
-                'learning_rate': [0.0001, 0.001, 0.01],
+                'learning_rate': [0.001, 0.005, 0.01],
                 'hidden_layers': [
                     [512, 256, 128, 64, 32, 16],  # Deep architecture
                     [512, 256, 128, 64],          # Medium-deep
@@ -137,7 +137,7 @@ def tune_mlp_parameters(X_train, y_train, X_valid, y_valid, X_test, y_test,
         else:
             # Standard architectures for smaller feature spaces (e.g., TCGA)
             param_grid = {
-                'learning_rate': [0.0001, 0.001, 0.01],
+                'learning_rate': [0.001, 0.005, 0.01],
                 'hidden_layers': [
                     [64, 32],
                     [64, 32, 16],

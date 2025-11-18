@@ -29,7 +29,7 @@ preprocessing:
   # These ensure fully connected graphs (required for BIGCLAM) with optimal density
   similarity_thresholds:
     tcga_brca_data: 0.1  # TCGA-BRCA: Optimal from grid search (similarity=0.1)
-    gse96058_data: 0.5  # GSE96058: Optimal from grid search (gives 6 communities, similarity=0.5)
+    gse96058_data: 0.45  # GSE96058: Adjusted to target 5 communities (similarity=0.45)
     # Default fallback if dataset not specified
     default: 0.4
   
@@ -96,12 +96,12 @@ classifiers:
     tcga_brca_data:
       mlp:
         num_runs: 10
-        num_epochs: 10000
-        learning_rate: 0.001
+        num_epochs: 10000  # Best from tuning
+        learning_rate: 0.01  # Best from tuning (increased from 0.001)
         patience: 10
         weight_decay: 0.0001
-        dropout_rate: 0.3
-        hidden_layers: [64, 32, 16]  # Adjust based on results
+        dropout_rate: 0.3  # Best from tuning
+        hidden_layers: [128, 64, 32, 16]  # Best from tuning (increased capacity)
         use_augmentation: true  # Enable data augmentation to balance classes
         use_class_weights: true  # Enable class weights for imbalanced classes
         augmentation_noise_std: 0.1  # Standard deviation for Gaussian noise augmentation
@@ -113,21 +113,21 @@ classifiers:
         warm_restart_T_mult: 2  # Multiplier for restart period (doubles each time)
         gradient_clip: 1.0  # Gradient clipping to help escape local minima (set to 0 to disable)
       svm:
-        kernel: "rbf"
-        C: 0.1  # Adjust based on results (try 0.01, 0.1, 1.0, 10.0)
-        gamma: "scale"  # Or try "auto", 0.001, 0.01, 0.1
+        kernel: "rbf"  # Best from tuning
+        C: 10.0  # Best from tuning (increased from 0.1)
+        gamma: "scale"  # Best from tuning
         probability: true
         use_class_weights: true  # Enable class weights for imbalanced classes
     
     gse96058_data:
       mlp:
         num_runs: 10
-        num_epochs: 10000
-        learning_rate: 0.001
+        num_epochs: 250  # Best from tuning (reduced from 10000)
+        learning_rate: 0.0001  # Best from tuning (reduced from 0.001)
         patience: 10
         weight_decay: 0.0001
-        dropout_rate: 0.3
-        hidden_layers: [512, 256, 128, 64, 32, 16]  # Deep architecture for 843 features
+        dropout_rate: 0.3  # Best from tuning
+        hidden_layers: [512, 256, 128, 64]  # Best from tuning (reduced from 6 to 4 layers)
         use_augmentation: true  # Enable data augmentation to balance classes
         use_class_weights: true  # Enable class weights for imbalanced classes
         augmentation_noise_std: 0.1  # Standard deviation for Gaussian noise augmentation
@@ -139,9 +139,9 @@ classifiers:
         warm_restart_T_mult: 2  # Multiplier for restart period (doubles each time)
         gradient_clip: 1.0  # Gradient clipping to help escape local minima (set to 0 to disable)
       svm:
-        kernel: "rbf"
-        C: 0.1  # Adjust based on results (try 0.01, 0.1, 1.0, 10.0)
-        gamma: "scale"  # Or try "auto", 0.001, 0.01, 0.1
+        kernel: "rbf"  # Best from tuning
+        C: 10.0  # Best from tuning (increased from 0.1)
+        gamma: "scale"  # Best from tuning
         probability: true
         use_class_weights: true  # Enable class weights for imbalanced classes
     
