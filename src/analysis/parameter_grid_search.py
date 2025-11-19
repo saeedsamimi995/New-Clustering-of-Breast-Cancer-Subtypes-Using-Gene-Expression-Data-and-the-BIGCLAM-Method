@@ -492,9 +492,14 @@ def run_grid_search(dataset_name, input_file, similarity_range,
         0.1 * successful_df['f1_macro']
     )
     
-    # Prefer configurations with 4-5 communities (breast cancer subtypes)
+    # Prefer configurations with appropriate number of communities (dataset-specific)
     successful_df['community_bonus'] = 0.0
-    successful_df.loc[(successful_df['n_communities'] >= 4) & (successful_df['n_communities'] <= 5), 'community_bonus'] = 0.1
+    if dataset_name == 'gse96058_data':
+        # GSE96058: Prefer 5-8 communities (target 7, closer to PAM50's 5 than 4)
+        successful_df.loc[(successful_df['n_communities'] >= 5) & (successful_df['n_communities'] <= 8), 'community_bonus'] = 0.1
+    else:
+        # TCGA-BRCA: Prefer 5+ communities (breast cancer subtypes)
+        successful_df.loc[(successful_df['n_communities'] >= 5), 'community_bonus'] = 0.1
     successful_df['final_score'] = successful_df['composite_score'] + successful_df['community_bonus']
     
     best_idx = successful_df['final_score'].idxmax()
