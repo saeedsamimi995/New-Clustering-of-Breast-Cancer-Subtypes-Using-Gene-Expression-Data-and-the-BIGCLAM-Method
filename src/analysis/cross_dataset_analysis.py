@@ -272,7 +272,7 @@ def analyze_cross_dataset_consistency(processed_dir='data/processed',
         tcga_membership = tcga_communities.copy()  # Save membership matrix
         tcga_communities = np.argmax(tcga_communities, axis=1)
     else:
-        tcga_membership = np.load(tcga_membership)
+       tcga_membership = np.load(tcga_membership)
     
     # Ensure 1D
     tcga_communities = tcga_communities.flatten()
@@ -286,7 +286,7 @@ def analyze_cross_dataset_consistency(processed_dir='data/processed',
         gse_membership = gse_communities.copy()  # Save membership matrix
         gse_communities = np.argmax(gse_communities, axis=1)
     else:
-        gse_membership = np.load(gse_membership)
+       gse_membership = np.load(gse_membership)
     
     # Ensure 1D
     gse_communities = gse_communities.flatten()

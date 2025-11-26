@@ -169,24 +169,24 @@ class BIGCLAM:
                 if num_restarts > 1:
                     print(f"  Restart {restart + 1}/{num_restarts} for {num_communities} communities...")
                 
-                # Initialize membership strength matrix
-                F = torch.rand((N, num_communities), device=self.device, requires_grad=True)
-                optimizer = torch.optim.Adam([F], lr=adjusted_lr)
+            # Initialize membership strength matrix
+            F = torch.rand((N, num_communities), device=self.device, requires_grad=True)
+            optimizer = torch.optim.Adam([F], lr=adjusted_lr)
                 
-                best_loss = float('inf')
-                no_improvement_count = 0
+            best_loss = float('inf')
+            no_improvement_count = 0
+            
+            for n in range(adjusted_iterations):
+                optimizer.zero_grad()
+                ll = log_likelihood(F, A)
+                loss = -ll  # Minimize negative log-likelihood
+                loss.backward()
+                optimizer.step()
                 
-                for n in range(adjusted_iterations):
-                    optimizer.zero_grad()
-                    ll = log_likelihood(F, A)
-                    loss = -ll  # Minimize negative log-likelihood
-                    loss.backward()
-                    optimizer.step()
-                    
-                    with torch.no_grad():
-                        # Ensure F is nonnegative
-                        F.data = torch.clamp(F.data, min=1e-12)
-                    
+                with torch.no_grad():
+                    # Ensure F is nonnegative
+                    F.data = torch.clamp(F.data, min=1e-12)
+            
                     # Early stopping check
                     if early_stopping:
                         loss_value = loss.item()
@@ -201,21 +201,21 @@ class BIGCLAM:
                                 break
                 
                 # Calculate score based on criterion
-                k = N * num_communities  # Number of parameters
-                if criterion == 'BIC':
+            k = N * num_communities  # Number of parameters
+            if criterion == 'BIC':
                     # BIC: BIC = -2 * log_likelihood + log(N) * k
-                    score = -2 * ll.item() + np.log(N) * k
-                else:
+                score = -2 * ll.item() + np.log(N) * k
+            else:
                     # AIC: AIC = -2 * log_likelihood + 2 * k
-                    score = -2 * ll.item() + 2 * k
+                score = -2 * ll.item() + 2 * k
                 
                 # Track best restart for this community number
-                if score < best_restart_score:
-                    best_restart_score = score
-                    best_restart_F = F.detach().cpu().numpy()
+            if score < best_restart_score:
+                best_restart_score = score
+                best_restart_F = F.detach().cpu().numpy()
                 
                 # Clean up GPU memory after each restart
-                if self.device.type == 'cuda':
+            if self.device.type == 'cuda':
                     torch.cuda.empty_cache()
             
             # Use best restart result
