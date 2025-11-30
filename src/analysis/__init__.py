@@ -12,6 +12,14 @@ from .parameter_grid_search import (
     create_grid_search_visualizations,
     clear_memory
 )
+from .comprehensive_method_comparison import (
+    comprehensive_method_comparison
+)
+from .results_synthesis import (
+    create_summary_table,
+    generate_narrative,
+    create_manuscript_results_section
+)
 
 __all__ = [
     'analyze_cross_dataset_consistency',
@@ -21,6 +29,10 @@ __all__ = [
     'run_grid_search',
     'run_single_combination',
     'create_grid_search_visualizations',
-    'clear_memory'
+    'clear_memory',
+    'comprehensive_method_comparison',
+    'create_summary_table',
+    'generate_narrative',
+    'create_manuscript_results_section'
 ]
 

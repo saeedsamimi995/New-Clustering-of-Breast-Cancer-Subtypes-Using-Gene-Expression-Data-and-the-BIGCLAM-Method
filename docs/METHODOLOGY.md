@@ -12,6 +12,10 @@ This document provides comprehensive methodological details to ensure reproducib
 6. [Data Augmentation](#data-augmentation)
 7. [Classifier Specifications](#classifier-specifications)
 8. [Evaluation Metrics](#evaluation-metrics)
+9. [Survival Analysis](#survival-analysis)
+10. [Comprehensive Method Comparison](#comprehensive-method-comparison)
+11. [Cluster-to-PAM50 Mapping](#cluster-to-pam50-mapping)
+12. [Additional Validation Analyses](#additional-validation-analyses)
 
 ## Data Description
 
@@ -21,6 +25,9 @@ This document provides comprehensive methodological details to ensure reproducib
 - **Total Features**: Variable (typically 20,000+ genes)
 - **Samples**: 1,093 breast cancer patients
 - **Labels**: Oncotree histological subtypes (IDC, ILC, MDLC, Mixed, etc.)
+  - **Note**: Oncotree represents histological classification (tissue morphology)
+  - **For molecular clustering validation**: PAM50 is used as ground truth (see GSE96058)
+  - **Oncotree usage**: External validation only, not ground truth for molecular clustering
 - **Data Format**: RNA-seq expression data (log2-transformed RSEM values)
 - **Access**: 
   - Genomic Data Commons (GDC): https://portal.gdc.cancer.gov/projects/TCGA-BRCA
@@ -40,6 +47,9 @@ This document provides comprehensive methodological details to ensure reproducib
     - Other RNA species
 - **Samples**: 3,273 breast cancer patients with 136 replicates
 - **Labels**: PAM50 molecular subtypes (LumA, LumB, Her2, Basal, Normal)
+  - **PAM50**: Gene expression-based molecular classification system
+  - **Used as primary ground truth** for molecular clustering validation in this study
+  - **Distinct from Oncotree**: PAM50 reflects molecular characteristics, not histological morphology
 - **Data Format**: Transcript-level expression (normalized and transformed)
 - **Access**: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE96058
 
@@ -518,6 +528,500 @@ All package versions specified in `requirements.txt`
 ### Configuration
 
 All hyperparameters stored in `config/config.yml`
+
+## Survival Analysis
+
+### Overview
+
+Survival analysis evaluates whether BIGCLAM-identified clusters have prognostic significance by assessing differences in overall survival (OS) between clusters. This analysis validates that the discovered molecular subtypes are clinically meaningful and associated with patient outcomes.
+
+### Data Requirements
+
+**Required Clinical Variables:**
+- `OS_time`: Overall survival time (in days)
+- `OS_event`: Event indicator (1 = death, 0 = censored)
+- `sample_id`: Sample identifier for merging with cluster assignments
+
+**Optional Adjustment Variables:**
+- `age`: Age at diagnosis (continuous)
+- `stage`: Disease stage (categorical, e.g., I, II, III, IV)
+
+**Data Sources:**
+- **TCGA**: `data/brca_tcga_pub_clinical_data.tsv`
+- **GSE96058**: `data/GSE96058_clinical_data.csv` (transposed format)
+
+### Sample ID Matching
+
+**TCGA Dataset:**
+- Cluster assignments use normalized IDs (e.g., `TCGA.A1.A0SB`)
+- Clinical data uses TCGA barcodes (e.g., `TCGA-A1-A0SB-01`)
+- **Matching strategy**: Normalize IDs by:
+  1. Converting dashes to dots
+  2. Removing suffix (e.g., `-01`, `-02`)
+  3. Matching normalized forms
+
+**GSE96058 Dataset:**
+- Cluster assignments use position-based IDs (e.g., `F1`, `F2`, `F3...`)
+- Clinical data uses GEO sample IDs (e.g., `GSM...`)
+- **Matching strategy**: Position-based matching
+  - `F1` → first row in clinical data
+  - `F2` → second row in clinical data
+  - Assumes same sample order in both datasets
+
+### Methods
+
+#### 1. Kaplan-Meier Survival Curves
+
+**Purpose**: Visualize survival probability over time for each cluster.
+
+**Method**: Non-parametric estimation of survival function
+
+**Formula**:
+```
+S(t) = ∏_{i: t_i ≤ t} (1 - d_i / n_i)
+```
+
+Where:
+- `S(t)`: Survival probability at time t
+- `d_i`: Number of events at time t_i
+- `n_i`: Number at risk at time t_i
+
+**Implementation**: `lifelines.KaplanMeierFitter`
+
+**Output**: 
+- Survival curves for each cluster
+- Median survival times
+- Number at risk table
+- File: `{dataset}_km_survival.png`
+
+#### 2. Log-Rank Test
+
+**Purpose**: Test for statistically significant differences in survival distributions between clusters.
+
+**Method**: Non-parametric hypothesis test
+
+**Null Hypothesis (H₀)**: All clusters have identical survival distributions
+
+**Alternative Hypothesis (H₁)**: At least one cluster has a different survival distribution
+
+**Test Statistic**:
+```
+χ² = Σ (O_i - E_i)² / E_i
+```
+
+Where:
+- `O_i`: Observed number of events in group i
+- `E_i`: Expected number of events in group i (under H₀)
+
+**Pairwise Comparisons**: 
+- Performed for all cluster pairs
+- P-values adjusted for multiple comparisons (Bonferroni correction)
+
+**Implementation**: `lifelines.statistics.logrank_test`
+
+**Output**:
+- Pairwise p-values between clusters
+- Heatmap visualization
+- File: `{dataset}_logrank_results.csv`, `{dataset}_logrank_heatmap.png`
+
+**Interpretation**:
+- `p < 0.05`: Significant difference in survival between clusters
+- `p ≥ 0.05`: No significant difference
+
+#### 3. Cox Proportional Hazards Model
+
+**Purpose**: Quantify the association between cluster membership and survival, adjusting for clinical covariates.
+
+**Model Type**: Multivariate regression model
+
+**Hazard Function**:
+```
+h(t|X) = h₀(t) × exp(β₁X₁ + β₂X₂ + ... + βₖXₖ)
+```
+
+Where:
+- `h(t|X)`: Hazard at time t given covariates X
+- `h₀(t)`: Baseline hazard function
+- `βᵢ`: Regression coefficients
+- `Xᵢ`: Covariates (cluster membership, age, stage, etc.)
+
+**Hazard Ratio (HR)**:
+```
+HR = exp(β)
+```
+
+**Interpretation**:
+- `HR > 1`: Increased hazard (worse survival) compared to reference
+- `HR < 1`: Decreased hazard (better survival) compared to reference
+- `HR = 1`: No difference from reference
+
+**Model Specifications**:
+- **Reference cluster**: Typically cluster with best survival or largest sample size
+- **Adjustment variables**: Age, stage (if available and ≥50% non-null)
+- **Fallback**: Unadjusted model (cluster only) if adjusted model fails
+
+**Robustness Checks**:
+- Minimum sample size: 10 samples per variable
+- Minimum events: 5 events required
+- Missing data: Variables with <50% non-null values are excluded
+- Automatic fallback: Unadjusted model if adjusted model fails
+
+**Implementation**: `lifelines.CoxPHFitter`
+
+**Output**:
+- Hazard ratios with 95% confidence intervals
+- P-values for each cluster
+- Model summary statistics
+- File: `{dataset}_cox_summary.csv`
+
+**Visualization**:
+- Forest plot of hazard ratios
+- File: `{dataset}_hazard_ratio_forest.png`
+
+### Comprehensive Survival Summary Figure
+
+**Purpose**: Combine all survival analyses into a single publication-ready figure.
+
+**Components**:
+1. **Kaplan-Meier curves** (top panel, full width)
+   - Survival curves for all clusters
+   - Median survival times
+   - Number at risk table
+
+2. **Log-rank test heatmap** (middle left)
+   - Pairwise p-values between clusters
+   - Color-coded by significance
+
+3. **Hazard ratio forest plot** (middle right)
+   - HR with 95% CI for each cluster
+   - Reference line at HR=1.0
+   - Significance markers (*, **, ***)
+
+4. **Cox model summary table** (bottom)
+   - HR, CI, p-values for all clusters
+   - Adjustment variables included
+
+**Output**: `{dataset}_survival_summary.png`
+
+### Implementation Details
+
+**Library**: `lifelines` (Python survival analysis library)
+
+**Installation**:
+```bash
+pip install lifelines
+```
+
+**Usage**:
+```bash
+# Run survival evaluation
+python src/evaluation/survival_evaluator.py --datasets both
+
+# Or via run_all.py
+python run_all.py --steps survival
+```
+
+**Input Files**:
+- Cluster assignments: `data/clusterings/{dataset}_communities.npy`
+- Sample names: `data/processed/{dataset}_targets.pkl`
+- Clinical data: `data/{dataset}_clinical_data.{tsv|csv}`
+
+**Output Directory**: `results/survival/{dataset}/`
+
+**Output Files**:
+- `{dataset}_km_survival.png`: Kaplan-Meier curves
+- `{dataset}_logrank_results.csv`: Log-rank test results
+- `{dataset}_logrank_heatmap.png`: Log-rank p-value heatmap
+- `{dataset}_cox_summary.csv`: Cox model summary
+- `{dataset}_hazard_ratio_forest.png`: HR forest plot
+- `{dataset}_survival_summary.png`: Comprehensive summary figure
+
+### Interpretation Guidelines
+
+**Kaplan-Meier Curves**:
+- **Separation**: Clear separation indicates prognostic differences
+- **Median survival**: Time at which 50% of patients have died
+- **Censoring**: Vertical ticks indicate censored observations
+
+**Log-Rank Test**:
+- **Overall significance**: Tests if any clusters differ
+- **Pairwise comparisons**: Identifies which specific clusters differ
+- **Multiple testing**: Bonferroni correction applied
+
+**Cox Model**:
+- **Hazard Ratio**: Magnitude of survival difference
+- **Confidence Intervals**: Precision of HR estimate
+- **P-value**: Statistical significance
+- **Adjustment**: Controls for confounding variables (age, stage)
+
+**Clinical Significance**:
+- Clusters with significantly different survival (p < 0.05) are clinically meaningful
+- HR > 1.5 or < 0.67 indicates substantial prognostic difference
+- Consistent results across datasets strengthen validity
+
+### Limitations
+
+1. **Sample size**: Small clusters may have insufficient power
+2. **Censoring**: High censoring rates reduce statistical power
+3. **Follow-up time**: Short follow-up may miss late events
+4. **Missing data**: Adjustment variables may have missing values
+5. **Proportional hazards assumption**: Cox model assumes constant HR over time
+
+### Validation
+
+**Robustness Checks**:
+- Automatic fallback to unadjusted model if adjusted model fails
+- Minimum sample size and event requirements
+- Missing data handling (exclude variables with <50% non-null)
+- Sample ID matching validation (reports overlap before merge)
+
+**Quality Control**:
+- Reports number of samples with complete survival data
+- Validates required columns exist
+- Checks for sufficient events (≥5)
+- Warns about low sample size relative to number of variables
+
+## Comprehensive Method Comparison
+
+### Overview
+
+To validate BIGCLAM's performance, we compared it against five state-of-the-art clustering methods using multiple evaluation metrics. This comprehensive comparison demonstrates BIGCLAM's competitive performance and unique advantages for breast cancer subtype discovery.
+
+### Compared Methods
+
+1. **K-means** (Centroid-based)
+   - Type: Centroid-based partitioning
+   - Implementation: `sklearn.cluster.KMeans`
+   - Parameters: `n_clusters=5` (matching PAM50 subtypes), `random_state=42`
+   - Assumptions: Spherical clusters, non-overlapping
+
+2. **Spectral Clustering** (Graph-based)
+   - Type: Graph-based spectral decomposition
+   - Implementation: `sklearn.cluster.SpectralClustering`
+   - Parameters: `n_clusters=5`, `affinity='rbf'`, `gamma=1.0`
+   - Assumptions: Non-linear cluster boundaries, graph structure
+
+3. **NMF** (Non-negative Matrix Factorization)
+   - Type: Matrix factorization
+   - Implementation: `sklearn.decomposition.NMF`
+   - Parameters: `n_components=5`, `random_state=42`
+   - Assumptions: Non-negative data, additive parts
+
+4. **HDBSCAN** (Density-based) - Optional
+   - Type: Hierarchical density-based clustering
+   - Implementation: `hdbscan.HDBSCAN` (if available)
+   - Parameters: `min_cluster_size=10`, `min_samples=5`
+   - Assumptions: Variable density clusters, noise handling
+
+5. **Leiden/Louvain** (Graph-based community detection) - Optional
+   - Type: Modularity-based community detection
+   - Implementation: `leidenalg` (Leiden) or `networkx.algorithms.community` (Louvain)
+   - Parameters: Resolution parameter optimized
+   - Assumptions: Community structure in graphs
+
+6. **BIGCLAM** (Our Method)
+   - Type: Overlapping community detection via non-negative matrix factorization
+   - Implementation: Custom BIGCLAM model
+   - Parameters: Automatically determined via AIC
+   - Assumptions: Overlapping communities, network structure
+
+### Evaluation Metrics
+
+We evaluated all methods using four complementary metrics:
+
+1. **Silhouette Score** (Internal validation)
+   - Range: [-1, 1], higher is better
+   - Measures: Cohesion within clusters vs separation between clusters
+   - Formula: `s(i) = (b(i) - a(i)) / max(a(i), b(i))`
+     - `a(i)`: Average distance to points in same cluster
+     - `b(i)`: Average distance to points in nearest other cluster
+
+2. **Davies-Bouldin Index** (Internal validation)
+   - Range: [0, ∞), lower is better
+   - Measures: Average similarity ratio of clusters
+   - Formula: `DB = (1/k) × Σ max_{j≠i} ((σ_i + σ_j) / d(c_i, c_j))`
+     - `σ_i`: Average distance within cluster i
+     - `d(c_i, c_j)`: Distance between cluster centers
+
+3. **Normalized Mutual Information (NMI) vs PAM50** (External validation)
+   - Range: [0, 1], higher is better
+   - Measures: Agreement between clusters and PAM50 ground truth
+   - Formula: `NMI = I(X;Y) / sqrt(H(X) × H(Y))`
+     - `I(X;Y)`: Mutual information
+     - `H(X)`, `H(Y)`: Entropy
+
+4. **Adjusted Rand Index (ARI) vs PAM50** (External validation)
+   - Range: [-1, 1], higher is better (0 = random)
+   - Measures: Pairwise agreement between clusters and PAM50
+   - Formula: `ARI = (RI - E[RI]) / (max(RI) - E[RI])`
+     - `RI`: Rand Index
+     - `E[RI]`: Expected Rand Index
+
+### Results Summary
+
+#### TCGA Dataset (521 samples, 5 PAM50 subtypes)
+
+| Method | Type | Silhouette | Davies-Bouldin | NMI vs PAM50 | ARI vs PAM50 | N_Clusters | Runtime (s) |
+|--------|------|------------|----------------|--------------|--------------|------------|-------------|
+| **K-means** | Centroid | 0.0032 | 5.42 | **0.2570** | **0.1894** | 5 | 0.10 |
+| **BIGCLAM** | Graph | 0.0045 | 6.14 | **0.2370** | **0.2189** | 3 | - |
+| Spectral | Graph | **0.1678** | **0.66** | 0.0224 | 0.0071 | 5 | 7.74 |
+| NMF | Matrix Factorization | -0.0437 | 6.31 | 0.0984 | 0.0702 | 4 | 0.11 |
+| Louvain | Graph | 0.0064 | 5.57 | 0.0926 | 0.0471 | 8 | 0.17 |
+
+**Key Findings for TCGA:**
+- **BIGCLAM ranks 2nd** in PAM50 alignment (NMI=0.237, ARI=0.219), close to K-means (NMI=0.257, ARI=0.189)
+- BIGCLAM finds 3 clusters vs 5 PAM50 subtypes, suggesting it may merge related subtypes (e.g., LumA+LumB)
+- Spectral clustering has best internal structure (Silhouette=0.168, DB=0.66) but poor PAM50 alignment
+- K-means performs best overall for PAM50 alignment but assumes non-overlapping clusters
+
+#### GSE96058 Dataset (3,409 samples, 5 PAM50 subtypes)
+
+| Method | Type | Silhouette | Davies-Bouldin | NMI vs PAM50 | ARI vs PAM50 | N_Clusters | Runtime (s) |
+|--------|------|------------|----------------|--------------|--------------|------------|-------------|
+| **K-means** | Centroid | **0.0119** | 10.27 | **0.0271** | **0.0125** | 5 | 1.96 |
+| NMF | Matrix Factorization | -0.0184 | 16.16 | 0.0214 | 0.0159 | 5 | 3.94 |
+| Spectral | Graph | -0.1066 | **3.97** | 0.0042 | 0.0022 | 5 | 1.57 |
+| Louvain | Graph | -0.0158 | 13.78 | 0.0097 | -0.0000 | 18 | 1.25 |
+| **BIGCLAM** | Graph | -0.0431 | 20.14 | 0.0070 | -0.0018 | 9 | - |
+
+**Key Findings for GSE96058:**
+- **K-means performs best** overall (NMI=0.027, ARI=0.013), though alignment is lower than TCGA
+- BIGCLAM shows over-clustering (9 clusters vs 5 PAM50) and negative ARI, indicating poor alignment
+- All methods show lower PAM50 alignment on GSE96058 compared to TCGA, suggesting dataset-specific challenges
+- Spectral clustering has best internal structure (DB=3.97) but poor PAM50 alignment
+
+### Interpretation
+
+1. **BIGCLAM Performance on TCGA:**
+   - Competitive with K-means for PAM50 alignment (2nd place)
+   - Discovers 3 clusters that may represent broader biological groupings
+   - May capture novel subtype relationships beyond standard PAM50 classification
+
+2. **BIGCLAM Performance on GSE96058:**
+   - Requires parameter tuning or preprocessing adjustments
+   - Over-clustering suggests threshold optimization needed
+   - Dataset may have different characteristics requiring method-specific tuning
+
+3. **Method-Specific Insights:**
+   - **K-means**: Best PAM50 alignment on both datasets, fast, but assumes non-overlapping clusters
+   - **Spectral**: Best internal structure metrics but poor PAM50 alignment, suggesting it captures different structure
+   - **BIGCLAM**: Competitive on TCGA, unique advantage of overlapping communities, automatically determines cluster number
+
+### Advantages of BIGCLAM
+
+1. **Overlapping Communities**: Unlike K-means and Spectral, BIGCLAM allows samples to belong to multiple subtypes, capturing biological complexity
+2. **Automatic Cluster Selection**: AIC-based model selection eliminates manual parameter tuning
+3. **Network-Based**: Leverages graph structure for community detection, suitable for expression similarity networks
+4. **Competitive Performance**: On TCGA, BIGCLAM ranks 2nd in PAM50 alignment while discovering potentially novel groupings
+
+### Implementation Details
+
+**Preprocessing for Comparison:**
+- All methods use the same standardized data (z-score normalized)
+- StandardScaler applied to ensure fair comparison
+- Same samples and features used across all methods
+
+**Runtime Considerations:**
+- K-means: Fastest (0.10s for TCGA, 1.96s for GSE96058)
+- BIGCLAM: Runtime not measured (uses pre-computed clusters)
+- Spectral: Slowest (7.74s for TCGA) due to eigenvalue decomposition
+
+**Cluster Number Selection:**
+- K-means, Spectral, NMF: Fixed at 5 (matching PAM50)
+- BIGCLAM: Automatically determined via AIC (3 for TCGA, 9 for GSE96058)
+- Louvain: Automatically determined via modularity optimization
+
+### Files and Outputs
+
+**Results Location**: `results/method_comparison/`
+
+**Output Files:**
+- `{dataset}_method_comparison.csv`: Summary table with all metrics
+- `{dataset}_method_comparison.pkl`: Detailed results including cluster assignments
+- `{dataset}_method_comparison_metrics.png`: Bar plots comparing metrics
+- `{dataset}_method_comparison_summary.png`: Comprehensive visualization
+
+**Usage:**
+```bash
+# Run comprehensive method comparison
+python src/analysis/comprehensive_method_comparison.py --dataset tcga_brca_data
+python src/analysis/comprehensive_method_comparison.py --dataset gse96058_data
+
+# Or via run_all.py
+python run_all.py --steps method_comparison
+```
+
+## Cluster-to-PAM50 Mapping
+
+### Purpose
+
+Cluster-to-PAM50 mapping analysis addresses reviewer concerns about interpretability of BIGCLAM clusters, especially when the number of clusters differs from the 5-class PAM50 system (e.g., 9 clusters on GSE96058 vs 5 PAM50 subtypes).
+
+### Method
+
+For each BIGCLAM cluster, we analyze:
+1. **PAM50 distribution**: Count and percentage of each PAM50 subtype within the cluster
+2. **Dominant PAM50 subtype**: The PAM50 type most represented in each cluster
+3. **Cluster purity**: Whether clusters are pure (single PAM50 type) or mixed (multiple PAM50 types)
+4. **Visualization**: Heatmaps showing PAM50 distribution per cluster
+
+### Implementation
+
+**Script**: `src/analysis/cluster_pam50_mapping.py`
+
+**Usage**:
+```bash
+# Run for specific dataset
+python src/analysis/cluster_pam50_mapping.py --dataset gse96058
+python src/analysis/cluster_pam50_mapping.py --dataset tcga
+
+# Or via run_all.py
+python run_all.py --steps cluster_pam50_mapping
+```
+
+**Output Files**:
+- `results/cluster_pam50_mapping/{dataset}/cluster_pam50_mapping.csv`: Detailed mapping table
+- `results/cluster_pam50_mapping/{dataset}/cluster_pam50_heatmap.png`: Visualization heatmap
+- `results/cluster_pam50_mapping/{dataset}/mapping_summary.txt`: Summary statistics
+
+### Interpretation
+
+**Pure Clusters**:
+- Single dominant PAM50 subtype (>80% of samples)
+- Suggests cluster represents a distinct molecular subtype
+- Example: Cluster X = 95% Luminal A
+
+**Mixed Clusters**:
+- Multiple PAM50 subtypes represented
+- May indicate:
+  - Transition states between subtypes
+  - Intermediate phenotypes
+  - Biological overlap between subtypes
+- Example: Cluster Y = 60% Luminal A, 30% Luminal B, 10% HER2
+
+**Sub-subtype Discovery**:
+- When BIGCLAM finds more clusters than PAM50 types (e.g., 9 vs 5)
+- Suggests finer molecular substructure within PAM50 subtypes
+- Example: Multiple clusters mapping to "Luminal A" may represent Luminal A1, Luminal A2, etc.
+
+### Ground Truth Clarification
+
+**PAM50 vs Oncotree**:
+- **PAM50**: Gene expression-based molecular subtypes (Luminal A, Luminal B, HER2-enriched, Basal-like, Normal)
+  - Used as primary ground truth for molecular clustering validation
+  - Reflects intrinsic molecular characteristics
+- **Oncotree**: Histological subtypes (IDC, ILC, MDLC, etc.)
+  - Used in TCGA dataset
+  - Represents tissue morphology, not molecular classification
+  - Treated as external validation, not ground truth for molecular clustering
+
+**For this study**:
+- PAM50 is the primary ground truth for molecular alignment
+- Oncotree labels are used for external validation (histological classification)
+- BIGCLAM clusters are validated against PAM50, not Oncotree
+
+---
 
 ## Additional Validation Analyses
 

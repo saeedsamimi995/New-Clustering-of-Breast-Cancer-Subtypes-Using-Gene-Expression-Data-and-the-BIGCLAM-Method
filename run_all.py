@@ -34,6 +34,7 @@ from src.evaluation.survival_evaluator import load_tcga_clinical, load_gse96058_
 from src.visualization import create_all_visualizations
 from src.interpretation import interpret_results, analyze_overlap, biological_interpretation_pipeline
 from src.analysis import analyze_cross_dataset_consistency, run_grid_search
+from src.analysis.comprehensive_method_comparison import compare_all_methods
 from src.classifiers import validate_clustering_with_classifiers
 
 def load_config(config_path='config/config.yml'):
@@ -51,7 +52,8 @@ def main():
     parser.add_argument('--skip_classification', action='store_true', help='Skip classification validation')
     parser.add_argument('--steps', nargs='+', choices=[
         'preprocess', 'graph', 'cluster', 'evaluate', 
-        'visualize', 'interpret', 'biological_interpretation', 'cross_dataset', 'classify', 'grid_search', 'survival'
+        'visualize', 'interpret', 'biological_interpretation', 'cross_dataset', 'classify', 'grid_search', 'survival', 'method_comparison',
+        'cluster_pam50_mapping', 'results_synthesis'
     ], help='Run specific steps only')
     
     args = parser.parse_args()
@@ -68,7 +70,8 @@ def main():
         steps_to_run = args.steps
     else:
         steps_to_run = ['preprocess', 'graph', 'cluster', 'evaluate', 
-                       'visualize', 'interpret', 'biological_interpretation', 'cross_dataset', 'classify', 'survival']
+                       'visualize', 'interpret', 'biological_interpretation', 'cross_dataset', 'classify', 'survival', 'method_comparison',
+                       'cluster_pam50_mapping', 'results_synthesis']
     
     # Special case: grid_search runs its own pipeline (starts from data_preprocessing.py)
     # NOTE: Grid search ONLY uses prepared CSV files (*_target_added.csv) as input.
@@ -681,6 +684,85 @@ def main():
                                         clustering_dir='data/clusterings',
                                         output_dir='results/cross_dataset')
     
+    # Step 10: Method Comparison
+    if 'method_comparison' in steps_to_run:
+        print("\n" + "="*80)
+        print("STEP 10: COMPREHENSIVE METHOD COMPARISON")
+        print("="*80)
+        
+        dataset_config = config.get('dataset_preparation', {})
+        
+        # Run for each dataset
+        for dataset_name in ['tcga', 'gse96058']:
+            dataset_info = dataset_config.get(dataset_name, {})
+            if not dataset_info:
+                print(f"\n[Skip] {dataset_name}: No configuration found")
+                continue
+            
+            print(f"\n[Running] Method comparison for {dataset_name}...")
+            try:
+                compare_all_methods(
+                    dataset_name=dataset_name,
+                    processed_dir='data/processed',
+                    clustering_dir='data/clusterings',
+                    output_dir='results/method_comparison',
+                    use_pca=True,
+                    n_components=50
+                )
+            except Exception as e:
+                print(f"[Error] Failed to run method comparison for {dataset_name}: {e}")
+                import traceback
+                traceback.print_exc()
+    
+    # Step 11: Cluster-to-PAM50 Mapping
+    if 'cluster_pam50_mapping' in steps_to_run:
+        print("\n" + "="*80)
+        print("STEP 11: CLUSTER-TO-PAM50 MAPPING")
+        print("="*80)
+        
+        print("\n[Running] Cluster-to-PAM50 mapping analysis...")
+        try:
+            import subprocess
+            import sys
+            
+            for dataset_name in ['tcga', 'gse96058']:
+                print(f"\n[Processing] {dataset_name}...")
+                result = subprocess.run(
+                    [sys.executable, 'src/analysis/cluster_pam50_mapping.py', 
+                     '--dataset', dataset_name],
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode == 0:
+                    print(result.stdout)
+                else:
+                    print(f"[Warning] Cluster-PAM50 mapping failed for {dataset_name}: {result.stderr}")
+        except Exception as e:
+            print(f"[Error] Failed to run cluster-PAM50 mapping: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # Step 12: Results Synthesis
+    if 'results_synthesis' in steps_to_run:
+        print("\n" + "="*80)
+        print("STEP 13: RESULTS SYNTHESIS")
+        print("="*80)
+        
+        print("\n[Running] Synthesizing results from all analyses...")
+        try:
+            from src.analysis.results_synthesis import create_summary_table, generate_narrative, create_manuscript_results_section
+            
+            for dataset_name in ['tcga', 'gse96058']:
+                print(f"\n[Processing] {dataset_name}...")
+                summary_df = create_summary_table(dataset_name, 'results/synthesis')
+                if summary_df is not None:
+                    generate_narrative(dataset_name, summary_df, 'results/synthesis')
+                    create_manuscript_results_section(dataset_name, summary_df, 'results/synthesis')
+        except Exception as e:
+            print(f"[Error] Failed to synthesize results: {e}")
+            import traceback
+            traceback.print_exc()
+    
     # Final summary
     print("\n" + "="*80)
     print("PIPELINE COMPLETE!")
@@ -693,6 +775,9 @@ def main():
     print("  🧬 Biological:     results/biological_interpretation/")
     print("  🔗 Cross-dataset:  results/cross_dataset/")
     print("  💊 Survival:       results/survival/")
+    print("  📊 Method Comparison: results/method_comparison/")
+    print("  🗺️  Cluster-PAM50 Mapping: results/cluster_pam50_mapping/")
+    print("  📋 Results Synthesis: results/synthesis/")
     print("\nKey findings:")
     print("  • Check ARI/NMI scores in evaluation output")
     print("  • View t-SNE/UMAP plots to see cluster separation")
@@ -702,6 +787,7 @@ def main():
     print("  • Examine cell-type signature scores for each cluster")
     print("  • Examine cross-dataset correlations for consistency")
     print("  • Review survival curves and Cox models for prognostic significance")
+    print("  • Compare BIGCLAM with other clustering methods (K-means, Spectral, NMF, HDBSCAN, Leiden/Louvain)")
     print("="*80)
 
 

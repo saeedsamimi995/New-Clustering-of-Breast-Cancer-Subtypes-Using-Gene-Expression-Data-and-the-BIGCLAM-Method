@@ -24,6 +24,8 @@ from src.preprocessing import preprocess_data
 from src.graph.graph_construction import build_similarity_graph
 from src.clustering.clustering import cluster_data
 from src.evaluation.evaluators import evaluate_clustering
+from sklearn.metrics import silhouette_score, davies_bouldin_score
+from sklearn.preprocessing import StandardScaler
 
 
 def generate_precise_range(start, end, step):
@@ -194,6 +196,26 @@ def run_single_combination(
             f"{dataset_name}_var{variance_threshold}_sim{similarity_threshold}"
         )
         
+        # Calculate robustness metrics (Silhouette, Davies-Bouldin)
+        # These require the original expression data, not the graph
+        silhouette = None
+        davies_bouldin = None
+        try:
+            # Standardize expression data for internal metrics
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(expression_data)
+            
+            # Only calculate if we have at least 2 clusters and 2 samples per cluster
+            if n_communities >= 2 and len(communities) >= 2:
+                # Check minimum cluster size
+                cluster_sizes = [np.sum(communities == c) for c in range(n_communities)]
+                if min(cluster_sizes) >= 2:  # Need at least 2 samples per cluster
+                    silhouette = silhouette_score(X_scaled, communities)
+                    davies_bouldin = davies_bouldin_score(X_scaled, communities)
+        except Exception as e:
+            # Silently fail - these are optional robustness metrics
+            pass
+        
         # Handle return format: evaluate_clustering returns (results_dict, result_df) tuple
         if eval_output is None:
             results['error'] = 'Evaluation failed - no valid labels'
@@ -212,7 +234,9 @@ def run_single_combination(
                     'n_features': n_features,
                     'graph_density': density,
                     'n_edges': n_edges,
-                    'n_samples': len(communities)
+                    'n_samples': len(communities),
+                    'silhouette': silhouette if silhouette is not None else np.nan,
+                    'davies_bouldin': davies_bouldin if davies_bouldin is not None else np.nan
                 })
             else:
                 results['error'] = 'Evaluation failed - no valid labels'
@@ -523,6 +547,10 @@ def run_grid_search(dataset_name, input_file, similarity_range,
     print(f"     - Communities: {int(best_config['n_communities'])} (optimal: {int(best_config['optimal_k'])})")
     print(f"     - Features kept: {int(best_config['n_features']):,}")
     print(f"     - Graph density: {best_config['graph_density']:.2f}%")
+    if pd.notna(best_config.get('silhouette')):
+        print(f"     - Silhouette score: {best_config['silhouette']:.4f}")
+    if pd.notna(best_config.get('davies_bouldin')):
+        print(f"     - Davies-Bouldin index: {best_config['davies_bouldin']:.4f}")
     
     # Clean up temp directory
     if temp_dir.exists():
@@ -694,6 +722,15 @@ Graph/Feature Stats:
   • Graph density: {best_config['graph_density']:.2f}%
   • Communities:   {int(best_config['n_communities'])} (optimal k = {int(best_config['optimal_k'])})
 """
+    # Add robustness metrics if available
+    if pd.notna(best_config.get('silhouette')) or pd.notna(best_config.get('davies_bouldin')):
+        robustness_text = "\nRobustness Metrics:\n"
+        if pd.notna(best_config.get('silhouette')):
+            robustness_text += f"  • Silhouette score: {best_config['silhouette']:.4f}\n"
+        if pd.notna(best_config.get('davies_bouldin')):
+            robustness_text += f"  • Davies-Bouldin: {best_config['davies_bouldin']:.4f}\n"
+        summary_text += robustness_text
+    
     ax6.text(0, 0.95, summary_text, fontsize=11, fontfamily='monospace', va='top')
     
     plt.suptitle(f'{dataset_name}: Similarity Grid Search Summary', fontsize=16, fontweight='bold')
@@ -707,19 +744,23 @@ Graph/Feature Stats:
 
 
 def create_individual_heatmaps(df, dataset_name, output_dir, best_config):
-    """Create individual high-quality line plots for each metric (paper-ready)."""
+    """
+    Create individual high-quality line plots for each metric (paper-ready).
+    """
     output_dir = Path(output_dir)
     df = df.copy()
     df['similarity_threshold'] = df['similarity_threshold'].astype(float)
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    metrics = ['ari', 'nmi', 'purity', 'f1_macro']
+    metrics = ['ari', 'nmi', 'purity', 'f1_macro', 'silhouette', 'davies_bouldin']
     metric_names = [
         'Adjusted Rand Index (ARI)',
         'Normalized Mutual Information (NMI)',
         'Purity',
-        'F1-Score (Macro)'
+        'F1-Score (Macro)',
+        'Silhouette Score',
+        'Davies-Bouldin Index'
     ]
-    palette = ['#d73027', '#fc8d59', '#4575b4', '#1a9850']
+    palette = ['#d73027', '#fc8d59', '#4575b4', '#1a9850', '#F18F01', '#C73E1D']
     
     agg = (
         df.groupby('similarity_threshold')[numeric_cols]
@@ -729,6 +770,10 @@ def create_individual_heatmaps(df, dataset_name, output_dir, best_config):
     best_sim = best_config['similarity_threshold']
     
     for metric, metric_name, color in zip(metrics, metric_names, palette):
+        # Skip if metric doesn't exist in data
+        if metric not in agg.columns or pd.isna(agg[metric]).all():
+            continue
+            
         fig, ax = plt.subplots(figsize=(8, 6))
         ax.plot(
             agg.index,
@@ -738,13 +783,19 @@ def create_individual_heatmaps(df, dataset_name, output_dir, best_config):
             color=color,
             label=metric_name
         )
-        ax.scatter(best_sim, best_config[metric], color='black', s=120, marker='*', zorder=5, label='Selected')
+        if pd.notna(best_config.get(metric)):
+            ax.scatter(best_sim, best_config[metric], color='black', s=120, marker='*', zorder=5, label='Selected')
         ax.axvline(best_sim, color='black', linestyle='--', linewidth=1.2)
         ax.set_xlabel('Similarity Threshold')
         ax.set_ylabel(metric_name)
         ax.set_title(f'{dataset_name}: {metric_name} vs. Similarity', fontsize=14, fontweight='bold', pad=20)
         ax.grid(True, alpha=0.3)
         ax.legend()
+        
+        # For Davies-Bouldin, lower is better - invert y-axis
+        if metric == 'davies_bouldin':
+            ax.invert_yaxis()
+        
         plt.tight_layout()
         output_file = output_dir / f'{dataset_name}_{metric}_profile.png'
         plt.savefig(output_file, dpi=300, bbox_inches='tight')

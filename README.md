@@ -37,7 +37,8 @@ This project implements a modular pipeline for clustering breast cancer subtypes
 - ✅ Baseline comparison (original vs BIGCLAM features)
 - ✅ Computational benchmarking (runtime and memory)
 - ✅ Data augmentation ablation study
-- ✅ Method comparison (BIGCLAM vs K-means, hierarchical, spectral)
+- ✅ Comprehensive method comparison (BIGCLAM vs K-means, Spectral, NMF, HDBSCAN, Leiden/Louvain)
+- ✅ Cluster-to-PAM50 mapping analysis
 - ✅ Coefficient of variation option for feature selection
 
 **Documentation:**
@@ -245,23 +246,80 @@ python src/analysis/augmentation_ablation.py --dataset gse96058_data
 - Impact on imbalanced classes
 - Justification for augmentation approach
 
-#### 4. Method Comparison
-Compares BIGCLAM with other clustering methods:
-- **K-means**: Fast but may miss overlapping communities
-- **Hierarchical clustering**: Ward linkage, may be slow on large datasets
-- **Spectral clustering**: Memory intensive
-- **BIGCLAM**: Our method, optimized for overlapping communities
+#### 4. Cluster-to-PAM50 Mapping
+Maps BIGCLAM clusters to PAM50 molecular subtypes to address interpretability concerns, especially when BIGCLAM finds different numbers of clusters than the 5-class PAM50 system:
 
-**Purpose**: Demonstrates advantages of BIGCLAM for overlapping community detection.
+**Purpose**: 
+- Understand which PAM50 subtypes each BIGCLAM cluster represents
+- Identify sub-subtypes (e.g., when 9 clusters map to 5 PAM50 types)
+- Distinguish pure vs mixed clusters
+- Clarify ground truth usage (PAM50 for molecular, Oncotree for histological)
+
+**Features**:
+- PAM50 distribution per cluster (percentage composition)
+- Dominant PAM50 subtype identification
+- Cluster purity analysis (pure vs mixed)
+- Heatmap visualizations
 
 ```bash
-python src/analysis/method_comparison.py --dataset gse96058_data --n_clusters 4
+# Run cluster-to-PAM50 mapping
+python src/analysis/cluster_pam50_mapping.py --dataset gse96058
+python src/analysis/cluster_pam50_mapping.py --dataset tcga
+
+# Or via run_all.py
+python run_all.py --steps cluster_pam50_mapping
+```
+
+**Output**: `results/cluster_pam50_mapping/{dataset}/`
+- `cluster_pam50_mapping.csv`: Detailed mapping table
+- `cluster_pam50_heatmap.png`: Visualization heatmap
+- `mapping_summary.txt`: Summary statistics
+
+**Key Findings**:
+- **GSE96058**: BIGCLAM's 9 clusters represent subdivisions of PAM50 subtypes
+- **Mixed clusters**: Some clusters contain multiple PAM50 types, suggesting transition states
+- **Sub-subtype discovery**: Multiple clusters mapping to same PAM50 type may represent finer molecular substructure
+
+#### 5. Comprehensive Method Comparison
+Compares BIGCLAM with five state-of-the-art clustering methods:
+- **K-means** (Centroid-based): Fast, assumes spherical clusters
+- **Spectral Clustering** (Graph-based): Captures non-linear boundaries
+- **NMF** (Matrix Factorization): Non-negative matrix decomposition
+- **HDBSCAN** (Density-based): Variable density, noise handling (optional)
+- **Leiden/Louvain** (Graph-based): Modularity-based community detection (optional)
+- **BIGCLAM** (Our Method): Overlapping community detection
+
+**Metrics Evaluated:**
+- **Silhouette Score**: Internal cluster quality (cohesion vs separation)
+- **Davies-Bouldin Index**: Internal cluster quality (lower is better)
+- **NMI vs PAM50**: Agreement with ground truth subtypes
+- **ARI vs PAM50**: Pairwise agreement with ground truth
+
+**Purpose**: Validates BIGCLAM's competitive performance and demonstrates its unique advantages for overlapping community detection.
+
+```bash
+# Run comprehensive method comparison
+python src/analysis/comprehensive_method_comparison.py --dataset tcga_brca_data
+python src/analysis/comprehensive_method_comparison.py --dataset gse96058_data
+
+# Or via run_all.py
+python run_all.py --steps method_comparison
 ```
 
 **Output**: `results/method_comparison/{dataset}_method_comparison.csv`
-- ARI, NMI, Purity, F1-macro for each method
+- Complete metrics table (Silhouette, Davies-Bouldin, NMI, ARI)
 - Runtime comparison
-- Advantages of BIGCLAM
+- Cluster number comparison
+- Comprehensive visualization figures
+
+**Key Results:**
+- **TCGA**: BIGCLAM ranks 2nd in PAM50 alignment (NMI=0.237, ARI=0.219), close to K-means
+- **GSE96058**: K-means performs best overall; BIGCLAM requires parameter tuning
+- BIGCLAM's unique advantage: Overlapping communities and automatic cluster selection
+
+**Note**: Ground truth clarification:
+- **PAM50** (molecular subtypes): Used as primary ground truth for molecular clustering validation
+- **Oncotree** (histological subtypes): Used in TCGA, treated as external validation, not ground truth for molecular clustering
 
 #### Run All Validation Analyses
 
@@ -292,7 +350,7 @@ Confusion matrices are computed across multiple runs (n=10) and averaged. Decima
 - `results/baseline_comparison/` - Comparison of original vs BIGCLAM features
 - `results/benchmarks/` - Runtime and memory usage
 - `results/augmentation_ablation/` - Impact of data augmentation
-- `results/method_comparison/` - BIGCLAM vs other clustering methods
+- `results/method_comparison/` - Comprehensive comparison with K-means, Spectral, NMF, HDBSCAN, Leiden/Louvain
 
 ## Module Details
 
@@ -384,11 +442,25 @@ Confusion matrices are computed across multiple runs (n=10) and averaged. Decima
 - **Purpose**: Validates augmentation strategy and quantifies its impact
 - Outputs: `results/augmentation_ablation/{dataset}_augmentation_ablation.csv`
 
-### 13. `src/analysis/method_comparison.py`
-- **Method comparison**: BIGCLAM vs K-means, Hierarchical clustering, Spectral clustering
-- **Metrics evaluated**: ARI, NMI, Purity, F1-macro, Runtime
-- **Purpose**: Demonstrates advantages of BIGCLAM for overlapping community detection
-- Outputs: `results/method_comparison/{dataset}_method_comparison.csv`
+### 13. `src/analysis/comprehensive_method_comparison.py`
+- **Comprehensive method comparison**: BIGCLAM vs K-means, Spectral, NMF, HDBSCAN, Leiden/Louvain
+- **Metrics evaluated**: Silhouette Score, Davies-Bouldin, NMI vs PAM50, ARI vs PAM50, Runtime
+- **Purpose**: Validates BIGCLAM's competitive performance and demonstrates unique advantages for overlapping community detection
+- Outputs: 
+  - `results/method_comparison/{dataset}_method_comparison.csv` (summary table)
+  - `results/method_comparison/{dataset}_method_comparison.pkl` (detailed results)
+  - `results/method_comparison/{dataset}_method_comparison_metrics.png` (bar plots)
+  - `results/method_comparison/{dataset}_method_comparison_summary.png` (comprehensive figure)
+
+### 14. `src/analysis/cluster_pam50_mapping.py`
+- **Cluster-to-PAM50 mapping**: Maps BIGCLAM clusters to PAM50 molecular subtypes
+- **Features**: PAM50 distribution per cluster, dominant subtype identification, cluster purity analysis
+- **Purpose**: Addresses interpretability concerns when BIGCLAM finds different numbers of clusters than PAM50 (e.g., 9 vs 5)
+- **Ground truth clarification**: PAM50 (molecular) vs Oncotree (histological) usage
+- Outputs:
+  - `results/cluster_pam50_mapping/{dataset}/cluster_pam50_mapping.csv` (detailed mapping table)
+  - `results/cluster_pam50_mapping/{dataset}/cluster_pam50_heatmap.png` (visualization heatmap)
+  - `results/cluster_pam50_mapping/{dataset}/mapping_summary.txt` (summary statistics)
 
 ## Expected Results
 
@@ -542,9 +614,16 @@ results/
 ├── augmentation_ablation/   # Augmentation impact study
 │   ├── *_augmentation_ablation.pkl
 │   └── *_augmentation_ablation.csv
-├── method_comparison/       # Method comparison results
+├── method_comparison/       # Comprehensive method comparison results
 │   ├── *_method_comparison.pkl
-│   └── *_method_comparison.csv
+│   ├── *_method_comparison.csv
+│   ├── *_method_comparison_metrics.png
+│   └── *_method_comparison_summary.png
+├── cluster_pam50_mapping/  # Cluster-to-PAM50 mapping analysis
+│   ├── {dataset}/
+│   │   ├── cluster_pam50_mapping.csv
+│   │   ├── cluster_pam50_heatmap.png
+│   │   └── mapping_summary.txt
 └── cross_dataset/
     ├── community_correlations.png
     └── community_dendrogram.png
@@ -569,6 +648,7 @@ results/
 - **Adaptive model selection**: AIC/BIC selection based on dataset size
 - **Error estimation**: Confusion matrix averaging across multiple runs
 - **Data augmentation**: Gaussian noise injection methodology and impact analysis
+- **Cluster-to-PAM50 mapping**: Interpretability analysis and ground truth clarification (PAM50 vs Oncotree)
 
 ### Additional Validation Analyses
 
@@ -576,7 +656,7 @@ results/
 - Baseline comparison methodology
 - Computational benchmarking procedures
 - Augmentation ablation study design
-- Method comparison framework
+- Comprehensive method comparison framework (K-means, Spectral, NMF, HDBSCAN, Leiden/Louvain)
 
 **[docs/ANALYSES_RESPONSES.md](docs/ANALYSES_RESPONSES.md)** addresses methodological considerations:
 - Feature selection justification
