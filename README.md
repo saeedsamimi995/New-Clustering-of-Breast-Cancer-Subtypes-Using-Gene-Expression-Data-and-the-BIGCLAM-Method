@@ -629,6 +629,38 @@ results/
     └── community_dendrogram.png
 ```
 
+## Data and Code Availability
+
+**Code Repository**:
+- GitHub: [Repository URL - to be added]
+- DOI: [Zenodo DOI - to be added]
+
+**Processed Data and Results**:
+- Supplementary data: [Zenodo DOI - to be added]
+- Includes: Processed expression matrices, cluster assignments, evaluation metrics, survival analysis results
+
+**Raw Data Access**:
+- **TCGA-BRCA**: 
+  - Genomic Data Commons (GDC): https://portal.gdc.cancer.gov/projects/TCGA-BRCA
+  - Access via GDC Data Portal or GDC API
+  - Clinical data: `data/brca_tcga_pub_clinical_data.tsv`
+  
+- **GSE96058**:
+  - Gene Expression Omnibus (GEO): https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE96058
+  - Access via GEO website or GEOquery R package
+  - Clinical metadata: `data/GSE96058_clinical_data.csv`
+
+**Reproducibility**:
+- All analysis scripts are provided in `src/`
+- Configuration files: `config/config.yml`
+- Exact commands to reproduce: See [docs/METHODOLOGY.md](docs/METHODOLOGY.md)
+- Runtime and memory requirements: See `data/clusterings/{dataset}_runtime_info.json`
+
+**Environment**:
+- Python 3.8+
+- Dependencies: See `requirements.txt`
+- Optional: Dockerfile or environment.yml (to be added)
+
 ## Citations
 
 - **BIGCLAM**: Yang & Leskovec (2013). "Overlapping Community Detection at Scale: A Nonnegative Matrix Factorization Approach"

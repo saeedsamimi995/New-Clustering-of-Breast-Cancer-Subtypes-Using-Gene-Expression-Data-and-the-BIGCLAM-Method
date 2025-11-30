@@ -5,6 +5,23 @@ Performs comprehensive biological interpretation of BIGCLAM clusters:
 1. Differential gene expression analysis
 2. Pathway enrichment (GO, KEGG, Reactome)
 3. Cell-type signature analysis (immune, proliferation, EMT, angiogenesis, luminal/hormonal)
+
+Differential Expression Analysis:
+- Method: t-test (for normalized log2-transformed data)
+  * For RNA-seq: Use limma-voom (recommended for future versions)
+  * For microarray: Current t-test is appropriate for normalized data
+- Normalization: Data is log2-transformed and z-score normalized
+- Design: Cluster vs rest contrast
+- Covariates: None (univariate analysis)
+- Multiple testing: Benjamini-Hochberg FDR correction
+- Thresholds: |log2FC| >= 1.0, FDR < 0.05
+
+Pathway Enrichment Analysis:
+- Method: GSEA (gseapy) with gene ranking by log2FC
+- Databases: GO Biological Process, KEGG, Reactome
+- Enrichment p-values adjusted by FDR (Benjamini-Hochberg)
+- Significant pathways: FDR < 0.05
+- Leading-edge genes reported for enriched pathways
 """
 
 import numpy as np
@@ -314,6 +331,26 @@ def pathway_enrichment_analysis(de_genes, gene_names, dataset_name='human',
                                           'KEGG_2021_Human',
                                           'Reactome_2022'],
                                 output_dir='results/biological_interpretation'):
+    """
+    Pathway enrichment analysis using GSEA (gseapy).
+    
+    Method:
+    - Gene ranking: log2FC from differential expression
+    - Enrichment method: GSEA (Gene Set Enrichment Analysis)
+    - Databases: GO Biological Process, KEGG, Reactome
+    - Multiple testing correction: Benjamini-Hochberg FDR
+    - Significance threshold: FDR < 0.05
+    
+    Args:
+        de_genes: DataFrame with DE results (must include 'gene' and 'log2fc' columns)
+        gene_names: Array of gene identifiers
+        dataset_name: Organism name ('human' for gseapy)
+        databases: List of gene set databases
+        output_dir: Output directory
+    
+    Returns:
+        dict: Pathway enrichment results per database
+    """
     """
     Perform pathway enrichment analysis using gseapy.
     

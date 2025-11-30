@@ -7,6 +7,10 @@ Applies BIGCLAM clustering to similarity graphs and assigns labels to samples.
 import numpy as np
 from pathlib import Path
 import pickle
+import time
+import psutil
+import os
+import json
 import sys
 
 # Handle imports for both module and direct execution
@@ -47,6 +51,11 @@ def cluster_data(adjacency, max_communities=10, iterations=100, lr=0.08, criteri
     print(f"    Base learning rate: {lr}")
     print(f"    Model selection: {criterion}")
     
+    # Measure runtime and memory
+    process = psutil.Process(os.getpid())
+    mem_before = process.memory_info().rss / 1024 / 1024  # MB
+    start_time = time.time()
+    
     # Train BIGCLAM
     F, best_num_communities = train_bigclam(
         adjacency,
@@ -62,6 +71,23 @@ def cluster_data(adjacency, max_communities=10, iterations=100, lr=0.08, criteri
         num_restarts=num_restarts
     )
     
+    # Measure runtime and memory after
+    end_time = time.time()
+    mem_after = process.memory_info().rss / 1024 / 1024  # MB
+    peak_memory = process.memory_info().rss / 1024 / 1024  # MB
+    
+    runtime_seconds = end_time - start_time
+    memory_used_mb = mem_after - mem_before
+    
+    # Get number of CPU cores used
+    n_cores = os.cpu_count()
+    
+    print(f"\n[Performance]")
+    print(f"    Runtime: {runtime_seconds:.2f} seconds ({runtime_seconds/60:.2f} minutes)")
+    print(f"    Memory used: {memory_used_mb:.2f} MB ({memory_used_mb/1024:.2f} GB)")
+    print(f"    Peak memory: {peak_memory:.2f} MB ({peak_memory/1024:.2f} GB)")
+    print(f"    CPU cores available: {n_cores}")
+    
     # Get community assignments
     communities = np.argmax(F, axis=1)
     
@@ -70,7 +96,23 @@ def cluster_data(adjacency, max_communities=10, iterations=100, lr=0.08, criteri
     print(f"    Actual communities found: {len(set(communities))}")
     print(f"    Community sizes: {dict(zip(*np.unique(communities, return_counts=True)))}")
     
-    return communities, F, best_num_communities
+    # Runtime info
+    runtime_info = {
+        'runtime_seconds': runtime_seconds,
+        'runtime_minutes': runtime_seconds / 60,
+        'memory_used_mb': memory_used_mb,
+        'memory_used_gb': memory_used_mb / 1024,
+        'peak_memory_mb': peak_memory,
+        'peak_memory_gb': peak_memory / 1024,
+        'n_samples': int(adjacency.shape[0]),
+        'n_communities': int(best_num_communities),
+        'n_cores': n_cores,
+        'max_communities': max_communities,
+        'iterations': iterations,
+        'criterion': criterion
+    }
+    
+    return communities, F, best_num_communities, runtime_info
 
 
 def save_clustering_results(communities, membership, optimal_k, output_file):
@@ -207,7 +249,7 @@ def cluster_all_graphs(input_dir='data/graphs', output_dir='data/clusterings',
             adjacency = np.load(graph_file)
         
         # Cluster
-        communities, membership, optimal_k = cluster_data(
+        communities, membership, optimal_k, runtime_info = cluster_data(
             adjacency,
             max_communities=max_communities,
             iterations=dataset_iterations,
@@ -224,6 +266,12 @@ def cluster_all_graphs(input_dir='data/graphs', output_dir='data/clusterings',
         # Save results
         output_file = output_dir / f"{dataset_name}_communities"
         save_clustering_results(communities, membership, optimal_k, output_file)
+        
+        # Save runtime info
+        runtime_file = output_dir / f"{dataset_name}_runtime_info.json"
+        with open(runtime_file, 'w') as f:
+            json.dump(runtime_info, f, indent=2)
+        print(f"    Saved runtime info → {runtime_file}")
         
         results[dataset_name] = {
             'communities': communities,

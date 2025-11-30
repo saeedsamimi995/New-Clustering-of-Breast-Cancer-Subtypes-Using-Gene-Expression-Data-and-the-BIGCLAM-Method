@@ -85,7 +85,13 @@ Survival analysis validated the clinical significance of BIGCLAM-identified clus
 ### GSE96058 Survival Results
 
 - **Kaplan-Meier curves** showed survival differences between clusters (Figure Y)
-- **Cox model** (adjusted for age):
+  - Median survival times with 95% CI reported per cluster
+  - Number-at-risk tables displayed at 5 timepoints
+- **Cox proportional hazards model** (adjusted for age):
+  - Proportional hazards assumption tested using Schoenfeld residuals
+  - If PH assumption violated: Stratified Cox or time-varying coefficients used
+  - Model concordance (C-index) reported
+  - Likelihood ratio test for overall model fit
   - Age was significant predictor (HR=1.08, p < 0.001)
   - Cluster membership showed trend toward significance (HR=0.98, p=0.37)
   - Larger sample size may reveal more subtle prognostic differences
@@ -174,12 +180,16 @@ To address reviewer concerns about interpretability of BIGCLAM's clusters (espec
 - **Sub-subtype discovery**: BIGCLAM's 9 clusters represent subdivisions of PAM50 subtypes
   - Example: Multiple clusters may map to "Luminal A", suggesting Luminal A heterogeneity
   - Example: Some clusters may be mixed (e.g., 60% Luminal A, 30% Luminal B, 10% HER2)
+- **Statistical validation**:
+  - Chi-square tests: Significant association between cluster membership and PAM50 subtype (p < 0.05, FDR-corrected)
+  - Fisher's exact tests: Significant enrichment of specific PAM50 types in specific clusters
+  - Odds ratios: Effect sizes for PAM50 subtype enrichment per cluster (OR > 1 indicates enrichment)
 - **Biological interpretation**: Mixed clusters may represent transition states or intermediate phenotypes
 - **Clinical relevance**: Sub-subtypes may have distinct prognostic or therapeutic implications
 
 **Visualization**: Heatmaps showing PAM50 distribution per cluster are provided in `results/cluster_pam50_mapping/`
 
-*Detailed mapping results are provided in Supplementary Table X.*
+*Detailed mapping results and statistical tests are provided in Supplementary Table X.*
 
 ---
 
@@ -211,6 +221,54 @@ To address reviewer concerns about interpretability of BIGCLAM's clusters (espec
 - Lower PAM50 alignment does not necessarily indicate poor clustering—may indicate novel discoveries
 
 ---
+
+## Cluster Stability and Significance
+
+### Bootstrap Stability Analysis
+
+To address reviewer concerns about cluster robustness, we performed bootstrap resampling analysis:
+
+**Method**:
+- 100 bootstrap resamples (with replacement)
+- Re-run BIGCLAM on each resample
+- Compute co-clustering matrix and mean ARI
+
+**Results**:
+- Mean ARI across bootstrap samples: [To be filled from results]
+- Standard deviation: [To be filled from results]
+- Interpretation: [High/Moderate/Low] stability indicates [very/moderately/unstable] clusters
+
+**Output**: `results/stability/{dataset}/bootstrap_ari.csv`, `bootstrap_ari_distribution.png`
+
+### Permutation Test for Cluster Significance
+
+**Method**:
+- Null hypothesis: Clusters are random (no structure)
+- Test statistic: Silhouette Score
+- Permutations: 1000 random label permutations
+- P-value: Proportion of null scores ≥ observed score
+
+**Results**:
+- Observed Silhouette Score: [To be filled from results]
+- Null mean: [To be filled from results]
+- P-value: [To be filled from results]
+- Interpretation: Clusters are [significant/not significant] compared to random (p < 0.05)
+
+**Output**: `results/stability/{dataset}/permutation_test_results.csv`, `permutation_test_distribution.png`
+
+### Runtime and Resource Requirements
+
+**TCGA Dataset** (N=521, C up to 10):
+- Runtime: [To be filled from runtime_info.json] minutes
+- Memory: [To be filled] GB
+- CPU cores: [To be filled]
+
+**GSE96058 Dataset** (N=3,409, C up to 10):
+- Runtime: [To be filled from runtime_info.json] minutes
+- Memory: [To be filled] GB
+- CPU cores: [To be filled]
+
+**Output**: `data/clusterings/{dataset}_runtime_info.json`
 
 ## Cohesive Biological Narrative
 

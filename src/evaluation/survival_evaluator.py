@@ -19,6 +19,8 @@ from matplotlib.gridspec import GridSpec
 
 from lifelines import KaplanMeierFitter, CoxPHFitter
 from lifelines.statistics import logrank_test
+from lifelines.utils import median_survival_times
+from lifelines.statistics import proportional_hazard_test
 
 
 def prepare_survival_dataframe(cluster_assignments, clinical_df,
@@ -541,10 +543,181 @@ def create_survival_summary_figure(df, logrank_df, cph, cluster_col="cluster",
     plt.close()
 
 
+def test_proportional_hazards(cph, output_dir, dataset_name=None):
+    """
+    Test proportional hazards assumption using Schoenfeld residuals.
+    
+    Args:
+        cph: Fitted CoxPHFitter object
+        output_dir: Output directory for results
+        dataset_name: Optional dataset name
+    
+    Returns:
+        tuple: (ph_passed, ph_df) where ph_passed is bool and ph_df is DataFrame
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    try:
+        ph_test = proportional_hazard_test(cph, cph.duration_col)
+        
+        # Save results
+        ph_df = ph_test.summary
+        ph_file = output_dir / f'{dataset_name}_ph_test.csv' if dataset_name else output_dir / 'ph_test.csv'
+        ph_df.to_csv(ph_file)
+        print(f"[Saved] Proportional hazards test → {ph_file}")
+        
+        # Check violations (p < 0.05 indicates violation)
+        violations = ph_df[ph_df['p'] < 0.05]
+        if len(violations) > 0:
+            print(f"[Warning] PH assumption violated for: {violations.index.tolist()}")
+            print(f"  Consider using stratified Cox or time-varying coefficients")
+            return False, ph_df
+        else:
+            print("[OK] Proportional hazards assumption satisfied for all variables")
+            return True, ph_df
+    except Exception as e:
+        print(f"[Warning] PH test failed: {e}")
+        return None, None
+
+
+def calculate_median_survival_with_ci(df, time_col="OS_time", event_col="OS_event",
+                                     cluster_col="cluster", output_dir="results/survival",
+                                     dataset_name=None):
+    """
+    Calculate median survival with 95% CI per cluster.
+    
+    Args:
+        df: Survival dataframe
+        time_col: Time column name
+        event_col: Event column name
+        cluster_col: Cluster column name
+        output_dir: Output directory
+        dataset_name: Optional dataset name
+    
+    Returns:
+        DataFrame with median survival and CI per cluster
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    results = []
+    clusters = sorted(df[cluster_col].unique())
+    
+    for cluster in clusters:
+        cluster_df = df[df[cluster_col] == cluster]
+        
+        if len(cluster_df) == 0:
+            continue
+        
+        kmf = KaplanMeierFitter()
+        kmf.fit(cluster_df[time_col], cluster_df[event_col])
+        
+        # Get median survival
+        median_ci = median_survival_times(kmf.median_survival_time_)
+        
+        if len(median_ci) > 0:
+            median_val = median_ci.iloc[0]
+            ci = kmf.median_survival_time_.confidence_interval_
+            
+            results.append({
+                'cluster': cluster,
+                'median_survival_days': median_val if not pd.isna(median_val) else np.nan,
+                'ci_lower_95': ci.iloc[0, 0] if len(ci) > 0 and not pd.isna(ci.iloc[0, 0]) else np.nan,
+                'ci_upper_95': ci.iloc[0, 1] if len(ci) > 0 and not pd.isna(ci.iloc[0, 1]) else np.nan,
+                'n_samples': len(cluster_df),
+                'n_events': cluster_df[event_col].sum()
+            })
+        else:
+            # If median not reached, use last observed time
+            results.append({
+                'cluster': cluster,
+                'median_survival_days': np.nan,
+                'ci_lower_95': np.nan,
+                'ci_upper_95': np.nan,
+                'n_samples': len(cluster_df),
+                'n_events': cluster_df[event_col].sum()
+            })
+    
+    results_df = pd.DataFrame(results)
+    
+    # Save
+    median_file = output_dir / f'{dataset_name}_median_survival.csv' if dataset_name else output_dir / 'median_survival.csv'
+    results_df.to_csv(median_file, index=False)
+    print(f"[Saved] Median survival with CI → {median_file}")
+    
+    return results_df
+
+
+def add_number_at_risk_table(ax, df, time_col="OS_time", event_col="OS_event",
+                            cluster_col="cluster", n_timepoints=5):
+    """
+    Add number-at-risk table below KM plot.
+    
+    Args:
+        ax: Matplotlib axis
+        df: Survival dataframe
+        time_col: Time column name
+        event_col: Event column name
+        cluster_col: Cluster column name
+        n_timepoints: Number of timepoints to show
+    
+    Returns:
+        DataFrame with number at risk at each timepoint
+    """
+    clusters = sorted(df[cluster_col].unique())
+    max_time = df[time_col].max()
+    timepoints = np.linspace(0, max_time, n_timepoints)
+    
+    at_risk_data = []
+    table_data = []
+    
+    for cluster in clusters:
+        cluster_df = df[df[cluster_col] == cluster]
+        n_at_risk = []
+        
+        for t in timepoints:
+            # Number at risk = those who haven't had event and haven't been censored before time t
+            n = ((cluster_df[time_col] >= t) | 
+                 ((cluster_df[time_col] < t) & (cluster_df[event_col] == 0))).sum()
+            n_at_risk.append(int(n))
+        
+        at_risk_data.append({
+            'cluster': cluster,
+            **{f'timepoint_{i}': n for i, n in enumerate(n_at_risk)}
+        })
+        table_data.append([str(n) for n in n_at_risk])
+    
+    at_risk_df = pd.DataFrame(at_risk_data)
+    
+    # Add text table below plot (simpler approach)
+    table_text = "Number at risk:\n"
+    table_text += "Time: " + "  ".join([f"{int(t):>6}" for t in timepoints]) + "\n"
+    for i, cluster in enumerate(clusters):
+        table_text += f"C{cluster}: " + "  ".join([f"{n:>6}" for n in table_data[i]]) + "\n"
+    
+    # Add as text annotation
+    ax.text(0.02, 0.02, table_text, transform=ax.transAxes,
+           fontsize=8, verticalalignment='bottom', family='monospace',
+           bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    
+    return at_risk_df
+
+
 def run_logrank(df, cluster_col="cluster", time_col="OS_time",
-                event_col="OS_event"):
+                event_col="OS_event", apply_fdr_correction=True):
     """
     Run pairwise log-rank tests between all clusters.
+    
+    Args:
+        df: Survival dataframe
+        cluster_col: Cluster column name
+        time_col: Time column name
+        event_col: Event column name
+        apply_fdr_correction: If True, apply Benjamini-Hochberg FDR correction
+    
+    Returns:
+        DataFrame with log-rank test results
     """
     clusters = sorted(df[cluster_col].unique())
     results = []
@@ -568,17 +741,35 @@ def run_logrank(df, cluster_col="cluster", time_col="OS_time",
                 "cluster_A": c1,
                 "cluster_B": c2,
                 "p_value": test.p_value,
+                "p_value_adj": None,  # Will fill after
                 "statistic": test.test_statistic
             })
+    
+    results_df = pd.DataFrame(results)
+    
+    # Apply FDR correction if requested
+    if apply_fdr_correction and len(results_df) > 0:
+        try:
+            from statsmodels.stats.multitest import multipletests
+            _, p_adj, _, _ = multipletests(results_df['p_value'], method='fdr_bh')
+            results_df['p_value_adj'] = p_adj
+            print(f"[Info] Applied Benjamini-Hochberg FDR correction to log-rank tests")
+        except ImportError:
+            # Fallback to Bonferroni
+            n_tests = len(results_df)
+            results_df['p_value_adj'] = np.clip(results_df['p_value'] * n_tests, 0, 1)
+            print(f"[Info] Applied Bonferroni correction to log-rank tests (statsmodels not available)")
 
-    return pd.DataFrame(results)
+    return results_df
 
 
 def run_cox(df,
             duration_col="OS_time",
             event_col="OS_event",
             cluster_col="cluster",
-            adjust_cols=None):
+            adjust_cols=None,
+            output_dir="results/survival",
+            dataset_name=None):
     """
     Multivariate Cox proportional hazards model.
     
@@ -719,9 +910,18 @@ def survival_evaluation(cluster_assignments,
     plot_kaplan_meier(df, cluster_col=cluster_col, 
                      output_dir=dataset_output_dir, dataset_name=dataset_name)
 
+    # Calculate median survival with CI
+    print("\n[Calculating] Median survival with 95% CI per cluster...")
+    median_survival_df = calculate_median_survival_with_ci(
+        df, cluster_col=cluster_col, 
+        output_dir=dataset_output_dir, 
+        dataset_name=dataset_name
+    )
+    print(median_survival_df)
+    
     # Logrank test
-    log_df = run_logrank(df, cluster_col=cluster_col)
-    print("\nLog-rank pairwise results:")
+    log_df = run_logrank(df, cluster_col=cluster_col, apply_fdr_correction=True)
+    print("\nLog-rank pairwise results (with FDR correction):")
     print(log_df)
     
     # Save logrank results
@@ -761,7 +961,8 @@ def survival_evaluation(cluster_assignments,
 
     # Cox model
     try:
-        cph = run_cox(df, cluster_col=cluster_col, adjust_cols=final_adjust_cols)
+        cph = run_cox(df, cluster_col=cluster_col, adjust_cols=final_adjust_cols,
+                     output_dir=dataset_output_dir, dataset_name=dataset_name)
         if cph is not None:
             print("\nCox Model Summary:")
             print(cph.summary)
@@ -770,6 +971,16 @@ def survival_evaluation(cluster_assignments,
             summary_path = dataset_output_dir / "cox_summary.csv"
             cph.summary.to_csv(summary_path)
             print(f"[Saved] Cox model → {summary_path}")
+            
+            # Test proportional hazards assumption
+            print(f"\n[Testing] Proportional hazards assumption...")
+            try:
+                ph_passed, ph_df = test_proportional_hazards(cph, output_dir=dataset_output_dir, 
+                                                             dataset_name=dataset_name)
+                if ph_passed is False:
+                    print(f"[Warning] PH assumption violated. Consider stratified Cox or time-varying coefficients.")
+            except Exception as e:
+                print(f"[Warning] Could not test PH assumption: {e}")
             
             # Create hazard ratio forest plot
             try:

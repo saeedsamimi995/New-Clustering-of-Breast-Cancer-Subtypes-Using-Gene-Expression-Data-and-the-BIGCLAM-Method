@@ -615,18 +615,19 @@ Where:
 
 **Pairwise Comparisons**: 
 - Performed for all cluster pairs
-- P-values adjusted for multiple comparisons (Bonferroni correction)
+- P-values adjusted for multiple comparisons using Benjamini-Hochberg FDR correction
+- Global log-rank test also performed
 
 **Implementation**: `lifelines.statistics.logrank_test`
 
 **Output**:
-- Pairwise p-values between clusters
+- Pairwise p-values (raw and FDR-adjusted) between clusters
 - Heatmap visualization
 - File: `{dataset}_logrank_results.csv`, `{dataset}_logrank_heatmap.png`
 
 **Interpretation**:
-- `p < 0.05`: Significant difference in survival between clusters
-- `p ≥ 0.05`: No significant difference
+- `p_adj < 0.05`: Significant difference in survival between clusters (FDR-corrected)
+- `p_adj ≥ 0.05`: No significant difference
 
 #### 3. Cox Proportional Hazards Model
 
@@ -670,9 +671,17 @@ HR = exp(β)
 
 **Output**:
 - Hazard ratios with 95% confidence intervals
-- P-values for each cluster
-- Model summary statistics
-- File: `{dataset}_cox_summary.csv`
+- Wald p-values for each cluster
+- Model concordance (C-index)
+- Likelihood ratio test
+- Proportional hazards assumption test results
+- File: `{dataset}_cox_summary.csv`, `{dataset}_ph_test.csv`
+
+**Proportional Hazards Assumption**:
+- Tested using Schoenfeld residuals (`lifelines.statistics.proportional_hazard_test`)
+- Violations (p < 0.05) indicate non-proportional hazards
+- If violated: Consider stratified Cox models or time-varying coefficients
+- Results saved to `{dataset}_ph_test.csv`
 
 **Visualization**:
 - Forest plot of hazard ratios
@@ -684,18 +693,25 @@ HR = exp(β)
 
 **Components**:
 1. **Kaplan-Meier curves** (top panel, full width)
-   - Survival curves for all clusters
-   - Median survival times
-   - Number at risk table
+   - Survival curves for all clusters with 95% confidence intervals
+   - Median survival times with 95% CI (reported in `{dataset}_median_survival.csv`)
+   - Number at risk table at 5 timepoints (displayed below curves)
 
 2. **Log-rank test heatmap** (middle left)
-   - Pairwise p-values between clusters
+   - Pairwise p-values (FDR-adjusted) between clusters
    - Color-coded by significance
 
 3. **Hazard ratio forest plot** (middle right)
    - HR with 95% CI for each cluster
    - Reference line at HR=1.0
    - Significance markers (*, **, ***)
+
+4. **Cluster sizes and events** (bottom left)
+   - Bar plot showing total samples and events per cluster
+
+5. **Summary statistics** (bottom right)
+   - Total samples, events, median survival, number of clusters
+   - Cox model status and significant log-rank tests
 
 4. **Cox model summary table** (bottom)
    - HR, CI, p-values for all clusters
@@ -952,6 +968,101 @@ python src/analysis/comprehensive_method_comparison.py --dataset gse96058_data
 python run_all.py --steps method_comparison
 ```
 
+## Cluster Stability Analysis
+
+### Purpose
+
+Cluster stability analysis addresses reviewer concerns about the robustness and significance of BIGCLAM clusters. It demonstrates that clusters are:
+1. **Stable** across bootstrap resamples
+2. **Significant** (non-random) compared to permuted labels
+3. **Reproducible** under small perturbations
+
+### Methods
+
+#### 1. Bootstrap Resampling
+
+**Purpose**: Assess cluster stability by measuring agreement across bootstrap samples.
+
+**Method**:
+- Generate 100 bootstrap resamples (with replacement)
+- For each resample, re-run BIGCLAM clustering
+- Compute co-clustering matrix: frequency with which pairs of samples cluster together
+- Calculate mean Adjusted Rand Index (ARI) across resamples
+
+**Metrics**:
+- **Mean ARI**: Average ARI between bootstrap clusters and original clusters
+- **ARI Standard Deviation**: Variability in cluster assignments
+- **Co-clustering Matrix**: Heatmap showing frequency of sample pairs clustering together
+
+**Output**:
+- `bootstrap_ari.csv`: ARI scores for each bootstrap iteration
+- `bootstrap_ari_distribution.png`: Histogram of ARI distribution
+
+**Interpretation**:
+- High mean ARI (>0.7): Very stable clusters
+- Moderate mean ARI (0.4-0.7): Moderately stable clusters
+- Low mean ARI (<0.4): Unstable clusters
+
+**Note**: Full bootstrap requires re-running BIGCLAM on each sample, which is computationally expensive. Current implementation provides framework; full bootstrap can be run if needed.
+
+#### 2. Permutation Test for Cluster Significance
+
+**Purpose**: Test whether observed clustering metrics are significantly better than random.
+
+**Null Hypothesis (H₀)**: Clusters are random (no structure)
+
+**Alternative Hypothesis (H₁)**: Clusters have meaningful structure
+
+**Method**:
+1. Calculate observed metric: Silhouette Score on actual clusters
+2. Generate null distribution: Permute cluster labels 1000 times, calculate Silhouette Score for each
+3. Calculate p-value: Proportion of null scores ≥ observed score
+
+**Test Statistic**: Silhouette Score
+- Range: [-1, 1]
+- Higher = better separation and cohesion
+
+**P-value Interpretation**:
+- `p < 0.05`: Clusters are significantly better than random (reject H₀)
+- `p ≥ 0.05`: Clusters are not significantly different from random (fail to reject H₀)
+
+**Output**:
+- `permutation_test_results.csv`: Observed score, null distribution statistics, p-value
+- `permutation_test_distribution.png`: Histogram of null distribution with observed score marked
+
+**Implementation**: `src/analysis/cluster_stability.py`
+
+### Runtime and Resource Reporting
+
+**Purpose**: Document computational requirements for reproducibility.
+
+**Metrics Reported**:
+- **Runtime**: Wall-clock time in seconds and minutes
+- **Memory Usage**: Peak memory consumption (MB and GB)
+- **CPU Cores**: Number of available CPU cores
+- **Sample Size**: Number of samples clustered
+- **Number of Communities**: Optimal number found
+
+**Output**:
+- `{dataset}_runtime_info.json`: JSON file with all runtime metrics
+
+**Example Output**:
+```json
+{
+  "runtime_seconds": 125.34,
+  "runtime_minutes": 2.09,
+  "memory_used_mb": 2048.5,
+  "memory_used_gb": 2.0,
+  "peak_memory_mb": 3072.0,
+  "peak_memory_gb": 3.0,
+  "n_samples": 521,
+  "n_communities": 3,
+  "n_cores": 8
+}
+```
+
+**Implementation**: Integrated into `src/clustering/clustering.py`
+
 ## Cluster-to-PAM50 Mapping
 
 ### Purpose
@@ -964,7 +1075,51 @@ For each BIGCLAM cluster, we analyze:
 1. **PAM50 distribution**: Count and percentage of each PAM50 subtype within the cluster
 2. **Dominant PAM50 subtype**: The PAM50 type most represented in each cluster
 3. **Cluster purity**: Whether clusters are pure (single PAM50 type) or mixed (multiple PAM50 types)
-4. **Visualization**: Heatmaps showing PAM50 distribution per cluster
+4. **Statistical tests**: Chi-square and Fisher's exact tests for PAM50 enrichment
+5. **Odds ratios**: Effect sizes for PAM50 subtype enrichment per cluster
+6. **Visualization**: Heatmaps showing PAM50 distribution per cluster
+
+### Statistical Tests
+
+#### Chi-Square Test
+
+**Purpose**: Test whether cluster membership is associated with PAM50 subtype distribution.
+
+**Null Hypothesis (H₀)**: Cluster membership is independent of PAM50 subtype
+
+**Alternative Hypothesis (H₁)**: Cluster membership is associated with PAM50 subtype
+
+**Method**:
+- Create 2×k contingency table (cluster vs others, k PAM50 types)
+- Calculate chi-square statistic: χ² = Σ (O - E)² / E
+- Degrees of freedom: (rows - 1) × (columns - 1)
+- P-values adjusted using Benjamini-Hochberg FDR correction
+
+**Output**: `cluster_pam50_statistical_tests.csv`
+
+#### Fisher's Exact Test and Odds Ratios
+
+**Purpose**: For each PAM50 type, test enrichment in each cluster and calculate effect size.
+
+**Method**:
+- For each cluster-PAM50 combination, create 2×2 contingency table:
+  ```
+  |              | In Cluster | Not in Cluster |
+  |--------------|------------|----------------|
+  | PAM50 Type X |     a      |       b        |
+  | Not Type X   |     c      |       d        |
+  ```
+- Calculate odds ratio: OR = (a/c) / (b/d)
+- Perform Fisher's exact test for significance
+- Report OR with 95% CI
+
+**Interpretation**:
+- `OR > 1`: PAM50 type is enriched in cluster
+- `OR < 1`: PAM50 type is depleted in cluster
+- `OR = 1`: No association
+- `p < 0.05`: Significant enrichment/depletion
+
+**Output**: Included in `cluster_pam50_statistical_tests.csv`
 
 ### Implementation
 
@@ -982,6 +1137,7 @@ python run_all.py --steps cluster_pam50_mapping
 
 **Output Files**:
 - `results/cluster_pam50_mapping/{dataset}/cluster_pam50_mapping.csv`: Detailed mapping table
+- `results/cluster_pam50_mapping/{dataset}/cluster_pam50_statistical_tests.csv`: Chi-square and Fisher's exact test results with odds ratios
 - `results/cluster_pam50_mapping/{dataset}/cluster_pam50_heatmap.png`: Visualization heatmap
 - `results/cluster_pam50_mapping/{dataset}/mapping_summary.txt`: Summary statistics
 
@@ -1022,6 +1178,103 @@ python run_all.py --steps cluster_pam50_mapping
 - BIGCLAM clusters are validated against PAM50, not Oncotree
 
 ---
+
+## Sample Matching Quality Control
+
+### Purpose
+
+Sample matching QC validates the correctness of sample-level merging between expression and clinical data, especially for datasets where positional matching is used (e.g., GSE96058 legacy format).
+
+### Method
+
+**For datasets with unique identifiers (TCGA)**:
+- Use TCGA barcodes for direct matching
+- Normalize IDs: Convert dashes to dots, remove suffixes (e.g., `-01`)
+
+**For datasets without unique identifiers (GSE96058)**:
+- Use positional matching (row order)
+- Validate matching using hash signatures:
+  1. Select top 100 most variable genes
+  2. Create MD5 hash signature for each sample's expression profile
+  3. Compare signatures to detect mismatches
+
+### Output
+
+**Files**:
+- `results/qc/{dataset}_sample_matching_report.csv`: Detailed matching table with hash signatures
+- `results/qc/{dataset}_sample_matching_summary.txt`: Summary statistics
+
+**Metrics Reported**:
+- Number of expression samples
+- Number of clinical samples
+- Number of matched samples
+- Matching rate (percentage)
+- Validation status (passed/warning)
+
+**Implementation**: `src/preprocessing/sample_matching_qc.py`
+
+**Usage**:
+```bash
+python src/preprocessing/sample_matching_qc.py --dataset gse96058
+```
+
+## Biological Interpretation Methods
+
+### Differential Expression Analysis
+
+**Method**: t-test for normalized log2-transformed expression data
+
+**Rationale**:
+- For RNA-seq: limma-voom is recommended for future versions
+- For microarray: Current t-test is appropriate for normalized data
+
+**Normalization**:
+- Data is log2-transformed (if not already)
+- Z-score normalization applied
+
+**Design**:
+- Contrast: Cluster vs rest (univariate analysis)
+- Covariates: None (can be extended to include age, stage if needed)
+
+**Multiple Testing Correction**:
+- Method: Benjamini-Hochberg FDR correction
+- Threshold: FDR < 0.05
+
+**Significance Criteria**:
+- |log2FC| >= 1.0 (2-fold change)
+- FDR < 0.05
+
+**Output**:
+- `cluster_{id}_differential_expression.csv`: Full DE results with log2FC, p-values, FDR
+
+**Implementation**: `src/interpretation/biological_interpretation.py`
+
+### Pathway Enrichment Analysis
+
+**Method**: Gene Set Enrichment Analysis (GSEA) via gseapy
+
+**Gene Ranking**:
+- Genes ranked by log2FC from differential expression analysis
+- Direction: Upregulated and downregulated genes considered separately
+
+**Databases**:
+- GO Biological Process 2021
+- KEGG 2021 Human
+- Reactome 2022
+
+**Enrichment Method**:
+- GSEA (Gene Set Enrichment Analysis)
+- Permutations: Default (1000)
+- Leading-edge genes reported
+
+**Multiple Testing Correction**:
+- Method: Benjamini-Hochberg FDR correction
+- Threshold: FDR < 0.05
+
+**Output**:
+- `cluster_{id}_pathway_enrichment_{database}.csv`: Enriched pathways with FDR, leading-edge genes
+
+**Implementation**: `src/interpretation/biological_interpretation.py`
 
 ## Additional Validation Analyses
 

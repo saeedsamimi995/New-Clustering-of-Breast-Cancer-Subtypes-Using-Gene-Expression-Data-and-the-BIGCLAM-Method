@@ -19,6 +19,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import normalized_mutual_info_score, adjusted_rand_score
+from scipy.stats import chi2_contingency, fisher_exact
 import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -111,6 +112,121 @@ def create_cluster_pam50_heatmap(clusters, pam50_labels, output_dir, dataset_nam
     return contingency, contingency_pct
 
 
+def add_statistical_tests(clusters, pam50_labels, output_dir, dataset_name):
+    """
+    Add chi-square and Fisher's exact tests for cluster-PAM50 enrichment.
+    
+    Returns:
+        DataFrame with statistical test results
+    """
+    unique_clusters = sorted(np.unique(clusters).astype(int))
+    unique_pam50 = sorted(set(pam50_labels))
+    
+    results = []
+    
+    for cluster_id in unique_clusters:
+        cluster_mask = clusters == cluster_id
+        cluster_pam50 = pam50_labels[cluster_mask]
+        other_pam50 = pam50_labels[~cluster_mask]
+        
+        # Build contingency table for each PAM50 type
+        cluster_counts = pd.Series(cluster_pam50).value_counts()
+        other_counts = pd.Series(other_pam50).value_counts()
+        
+        # Overall chi-square test (cluster vs others, all PAM50 types)
+        all_types = sorted(set(pam50_labels))
+        contingency_table = np.array([
+            [cluster_counts.get(t, 0) for t in all_types],
+            [other_counts.get(t, 0) for t in all_types]
+        ])
+        
+        # Chi-square test
+        try:
+            chi2, p_chi2, dof, expected = chi2_contingency(contingency_table)
+        except:
+            chi2, p_chi2, dof, expected = np.nan, np.nan, np.nan, None
+        
+        # Calculate odds ratios for each PAM50 type
+        ors = []
+        for pam50_type in all_types:
+            cluster_n = cluster_counts.get(pam50_type, 0)
+            cluster_not = cluster_mask.sum() - cluster_n
+            other_n = other_counts.get(pam50_type, 0)
+            other_not = (~cluster_mask).sum() - other_n
+            
+            if cluster_not > 0 and other_n > 0 and other_not > 0:
+                # Odds ratio
+                or_val = (cluster_n / cluster_not) / (other_n / other_not) if cluster_not > 0 and other_n > 0 else np.nan
+                
+                # Fisher's exact test for 2x2 table
+                try:
+                    oddsratio, p_fisher = fisher_exact([[cluster_n, cluster_not],
+                                                       [other_n, other_not]])
+                    ors.append({
+                        'pam50_type': pam50_type,
+                        'odds_ratio': or_val,
+                        'fisher_p': p_fisher,
+                        'cluster_n': cluster_n,
+                        'other_n': other_n
+                    })
+                except:
+                    ors.append({
+                        'pam50_type': pam50_type,
+                        'odds_ratio': or_val,
+                        'fisher_p': np.nan,
+                        'cluster_n': cluster_n,
+                        'other_n': other_n
+                    })
+        
+        results.append({
+            'cluster': int(cluster_id),
+            'chi2_statistic': chi2 if not np.isnan(chi2) else None,
+            'chi2_pvalue': p_chi2 if not np.isnan(p_chi2) else None,
+            'chi2_dof': int(dof) if not np.isnan(dof) else None,
+            'n_pam50_types': len(all_types),
+            'odds_ratios': ors
+        })
+    
+    # Apply FDR correction to chi-square p-values
+    try:
+        from statsmodels.stats.multitest import multipletests
+        p_values = [r['chi2_pvalue'] for r in results if r['chi2_pvalue'] is not None]
+        if len(p_values) > 0:
+            _, p_adj, _, _ = multipletests(p_values, method='fdr_bh')
+            adj_idx = 0
+            for r in results:
+                if r['chi2_pvalue'] is not None:
+                    r['chi2_pvalue_adj'] = p_adj[adj_idx]
+                    adj_idx += 1
+                else:
+                    r['chi2_pvalue_adj'] = None
+    except ImportError:
+        # Fallback: no correction
+        for r in results:
+            r['chi2_pvalue_adj'] = r['chi2_pvalue']
+    
+    # Flatten odds ratios into separate rows
+    flattened_results = []
+    for r in results:
+        base_result = {k: v for k, v in r.items() if k != 'odds_ratios'}
+        if r['odds_ratios']:
+            for or_data in r['odds_ratios']:
+                row = base_result.copy()
+                row.update(or_data)
+                flattened_results.append(row)
+        else:
+            flattened_results.append(base_result)
+    
+    results_df = pd.DataFrame(flattened_results)
+    
+    # Save
+    stats_file = output_dir / 'cluster_pam50_statistical_tests.csv'
+    results_df.to_csv(stats_file, index=False)
+    print(f"[Saved] Statistical tests → {stats_file}")
+    
+    return results_df
+
+
 def analyze_cluster_pam50_mapping(clusters, pam50_labels, output_dir, dataset_name):
     """Analyze mapping between clusters and PAM50."""
     unique_clusters = sorted(np.unique(clusters).astype(int))
@@ -151,7 +267,11 @@ def analyze_cluster_pam50_mapping(clusters, pam50_labels, output_dir, dataset_na
     mapping_df.to_csv(output_file, index=False)
     print(f"[Saved] Cluster-PAM50 mapping → {output_file}")
     
-    return mapping_df
+    # Add statistical tests
+    print(f"\n[Computing] Statistical tests (chi-square, Fisher's exact)...")
+    stats_df = add_statistical_tests(clusters, pam50_labels, output_dir, dataset_name)
+    
+    return mapping_df, stats_df
 
 
 def create_pam50_marker_heatmap(dataset_name, clusters, expression_data, output_dir):
@@ -211,7 +331,7 @@ def main():
     
     # Analyze mapping
     print("\n[Analyzing] Cluster-PAM50 mapping...")
-    mapping_df = analyze_cluster_pam50_mapping(clusters, pam50_labels, output_dir, args.dataset)
+    mapping_df, stats_df = analyze_cluster_pam50_mapping(clusters, pam50_labels, output_dir, args.dataset)
     
     # Create heatmap
     print("\n[Creating] Cluster-PAM50 heatmap...")

@@ -53,7 +53,7 @@ def main():
     parser.add_argument('--steps', nargs='+', choices=[
         'preprocess', 'graph', 'cluster', 'evaluate', 
         'visualize', 'interpret', 'biological_interpretation', 'cross_dataset', 'classify', 'grid_search', 'survival', 'method_comparison',
-        'cluster_pam50_mapping', 'results_synthesis'
+        'cluster_pam50_mapping', 'results_synthesis', 'sample_matching_qc', 'cluster_stability'
     ], help='Run specific steps only')
     
     args = parser.parse_args()
@@ -71,7 +71,7 @@ def main():
     else:
         steps_to_run = ['preprocess', 'graph', 'cluster', 'evaluate', 
                        'visualize', 'interpret', 'biological_interpretation', 'cross_dataset', 'classify', 'survival', 'method_comparison',
-                       'cluster_pam50_mapping', 'results_synthesis']
+                       'cluster_pam50_mapping', 'results_synthesis', 'sample_matching_qc', 'cluster_stability']
     
     # Special case: grid_search runs its own pipeline (starts from data_preprocessing.py)
     # NOTE: Grid search ONLY uses prepared CSV files (*_target_added.csv) as input.
@@ -742,10 +742,59 @@ def main():
             import traceback
             traceback.print_exc()
     
-    # Step 12: Results Synthesis
+    # Step 13: Sample Matching QC
+    if 'sample_matching_qc' in steps_to_run:
+        print("\n" + "="*80)
+        print("STEP 13: SAMPLE MATCHING QUALITY CONTROL")
+        print("="*80)
+        
+        for dataset_name in ['tcga', 'gse96058']:
+            print(f"\n[Running] Sample matching QC for {dataset_name}...")
+            try:
+                if dataset_name == 'tcga':
+                    expr_file = 'data/tcga_brca_data_target_added.csv'
+                    clinical_file = 'data/brca_tcga_pub_clinical_data.tsv'
+                else:
+                    expr_file = 'data/gse96058_data_target_added.csv'
+                    clinical_file = 'data/GSE96058_clinical_data.csv'
+                
+                create_sample_matching_qc(
+                    dataset_name=dataset_name,
+                    expression_file=expr_file,
+                    clinical_file=clinical_file,
+                    output_dir='results/qc'
+                )
+            except Exception as e:
+                print(f"[Error] Failed to run sample matching QC for {dataset_name}: {e}")
+                import traceback
+                traceback.print_exc()
+    
+    # Step 14: Cluster Stability Analysis
+    if 'cluster_stability' in steps_to_run:
+        print("\n" + "="*80)
+        print("STEP 14: CLUSTER STABILITY ANALYSIS")
+        print("="*80)
+        
+        for dataset_name in ['tcga', 'gse96058']:
+            print(f"\n[Running] Cluster stability analysis for {dataset_name}...")
+            try:
+                run_cluster_stability_analysis(
+                    dataset_name=dataset_name,
+                    processed_dir='data/processed',
+                    clustering_dir='data/clusterings',
+                    output_dir='results/stability',
+                    n_bootstrap=100,
+                    n_permutations=1000
+                )
+            except Exception as e:
+                print(f"[Error] Failed to run cluster stability analysis for {dataset_name}: {e}")
+                import traceback
+                traceback.print_exc()
+    
+    # Step 15: Results Synthesis
     if 'results_synthesis' in steps_to_run:
         print("\n" + "="*80)
-        print("STEP 13: RESULTS SYNTHESIS")
+        print("STEP 15: RESULTS SYNTHESIS")
         print("="*80)
         
         print("\n[Running] Synthesizing results from all analyses...")
@@ -778,6 +827,8 @@ def main():
     print("  📊 Method Comparison: results/method_comparison/")
     print("  🗺️  Cluster-PAM50 Mapping: results/cluster_pam50_mapping/")
     print("  📋 Results Synthesis: results/synthesis/")
+    print("  🔍 Sample Matching QC: results/qc/")
+    print("  🔬 Cluster Stability: results/stability/")
     print("\nKey findings:")
     print("  • Check ARI/NMI scores in evaluation output")
     print("  • View t-SNE/UMAP plots to see cluster separation")
