@@ -147,9 +147,9 @@ classifiers:
     
 # Data splitting parameters
 data_splitting:
-  test_size: 0.2
-  valid_size: 0.2
-  train_size: 0.6
+  test_size: 0.15
+  valid_size: 0.15
+  train_size: 0.75
   random_state: 42
   
 # Augmentation parameters

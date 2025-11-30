@@ -34,7 +34,8 @@ def augment_data(X, y, noise_std=0.1):
     """
     # Find max samples per class
     unique_labels, counts = np.unique(y, return_counts=True)
-    max_samples = counts.max()
+    #max_samples = counts.max()
+    max_samples = int(counts.mean() + counts.std())
     
     X_augmented = [X]
     y_augmented = [y]
@@ -49,8 +50,10 @@ def augment_data(X, y, noise_std=0.1):
             sampled_indices = np.random.choice(label_indices, n_needed, replace=True)
             
             # Add noise
-            noise = np.random.normal(0, noise_std, (n_needed, X.shape[1]))
-            X_new = X[sampled_indices] + noise
+            alpha = 0.2
+            lam = np.random.beta(alpha, alpha)
+            idx2 = np.random.choice(label_indices, n_needed, replace=True)
+            X_new = lam * X[sampled_indices] + (1-lam) * X[idx2]
             y_new = y[sampled_indices]
             
             X_augmented.append(X_new)
@@ -150,9 +153,9 @@ def compare_with_without_augmentation(dataset_name, processed_dir='data/processe
     mlp_no_aug_results = train_mlp(
         X_train_no_aug, y_train_no_aug, X_valid_no_aug, y_valid_no_aug,
         X_test_no_aug, y_test_no_aug,
-        hidden_layers=[80, 50, 20],
-        learning_rate=0.001,
-        num_epochs=200,
+        hidden_layers=[64, 32, 16],
+        learning_rate=0.01,
+        num_epochs=10000,
         patience=10
     )
     mlp_no_aug_time = time.time() - start_time
