@@ -19,6 +19,7 @@ import argparse
 import sys
 from pathlib import Path
 import yaml
+import pandas as pd
 import numpy as np
 import pickle
 
@@ -28,12 +29,12 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 from src.preprocessing import preprocess_data
 from src.graph import construct_graphs
 from src.clustering import cluster_all_graphs
-from src.evaluation import evaluate_all_datasets
+from src.evaluation import evaluate_all_datasets, survival_evaluation
+from src.evaluation.survival_evaluator import load_tcga_clinical, load_gse96058_clinical
 from src.visualization import create_all_visualizations
 from src.interpretation import interpret_results, analyze_overlap
 from src.analysis import analyze_cross_dataset_consistency, run_grid_search
 from src.classifiers import validate_clustering_with_classifiers
-
 
 def load_config(config_path='config/config.yml'):
     """Load configuration from YAML file."""
@@ -50,7 +51,7 @@ def main():
     parser.add_argument('--skip_classification', action='store_true', help='Skip classification validation')
     parser.add_argument('--steps', nargs='+', choices=[
         'preprocess', 'graph', 'cluster', 'evaluate', 
-        'visualize', 'interpret', 'cross_dataset', 'classify', 'grid_search'
+        'visualize', 'interpret', 'cross_dataset', 'classify', 'grid_search', 'survival'
     ], help='Run specific steps only')
     
     args = parser.parse_args()
@@ -67,7 +68,7 @@ def main():
         steps_to_run = args.steps
     else:
         steps_to_run = ['preprocess', 'graph', 'cluster', 'evaluate', 
-                       'visualize', 'interpret', 'cross_dataset', 'classify']
+                       'visualize', 'interpret', 'cross_dataset', 'classify', 'survival']
     
     # Special case: grid_search runs its own pipeline (starts from data_preprocessing.py)
     # NOTE: Grid search ONLY uses prepared CSV files (*_target_added.csv) as input.
@@ -329,6 +330,224 @@ def main():
                             targets_dir='data/processed',
                             output_dir='results/evaluation')
     
+    # Step 5.1: Survival Analysis
+    if 'survival' in steps_to_run:
+        print("\n" + "="*80)
+        print("STEP 5.1: SURVIVAL ANALYSIS")
+        print("="*80)
+
+        clustering_dir = Path('data/clusterings')
+        processed_dir = Path('data/processed')
+        survival_output_dir = Path('results/survival')
+        survival_output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Helper function to normalize TCGA sample IDs
+        def normalize_tcga_id(sid):
+            """Normalize TCGA sample ID by removing suffixes like -01, -02, etc."""
+            sid = str(sid).strip().upper()
+            sid = sid.replace('-', '').replace('.', '')
+            if len(sid) > 10 and sid[-2:].isdigit():
+                sid = sid[:-2]
+            return sid
+        
+        # Helper function to load and prepare clinical data using survival_evaluator functions
+        def load_clinical_data(clinical_file_path, sample_names, dataset_type='tcga'):
+            """
+            Load clinical data from file using survival_evaluator functions.
+            
+            Args:
+                clinical_file_path: Path to clinical data file
+                sample_names: List of sample names to match
+                dataset_type: 'tcga' or 'gse96058'
+            
+            Returns DataFrame with columns: sample_id, OS_time, OS_event, and optionally age, stage
+            """
+            if not Path(clinical_file_path).exists():
+                return None
+            
+            try:
+                # Use the appropriate loader based on dataset type
+                if dataset_type == 'gse96058':
+                    clinical_df = load_gse96058_clinical(clinical_file_path)
+                elif dataset_type == 'tcga':
+                    clinical_df = load_tcga_clinical(clinical_file_path)
+                    # For TCGA, we need to match sample names using normalized IDs
+                    if 'sample_id' in clinical_df.columns:
+                        # Normalize sample IDs for matching
+                        clinical_df['normalized_id'] = clinical_df['sample_id'].astype(str).apply(normalize_tcga_id)
+                        
+                        # Create normalized IDs from sample_names
+                        sample_df = pd.DataFrame({
+                            'sample_id': sample_names,
+                            'normalized_id': [normalize_tcga_id(sid) for sid in sample_names]
+                        })
+                        
+                        # Merge to match samples
+                        clinical_df = sample_df.merge(
+                            clinical_df,
+                            on='normalized_id',
+                            how='left',
+                            suffixes=('', '_clinical')
+                        )
+                        
+                        # Use original sample_id, drop duplicate
+                        if 'sample_id_clinical' in clinical_df.columns:
+                            clinical_df = clinical_df.drop(columns=['sample_id_clinical'])
+                        clinical_df = clinical_df.drop(columns=['normalized_id'], errors='ignore')
+                else:
+                    print(f"    [Error] Unknown dataset type: {dataset_type}")
+                    return None
+                
+                # Check required columns
+                if 'OS_time' not in clinical_df.columns or 'OS_event' not in clinical_df.columns:
+                    print(f"    [Warning] Missing survival columns in loaded data")
+                    print(f"      Available columns: {list(clinical_df.columns)}")
+                    return None
+                
+                print(f"    Survival data prepared: {len(clinical_df)} samples")
+                print(f"    Samples with OS_time: {clinical_df['OS_time'].notna().sum()}")
+                print(f"    Samples with OS_event: {clinical_df['OS_event'].notna().sum()}")
+                
+                return clinical_df
+                
+            except Exception as e:
+                print(f"    [Error] Failed to load clinical data: {e}")
+                import traceback
+                traceback.print_exc()
+                return None
+
+        # Loop over datasets - only process those with clinical data available
+        # Check which datasets have clinical files available
+        dataset_config = config.get('dataset_preparation', {})
+        datasets_to_process = []
+        
+        # Check TCGA
+        tcga_clinical = dataset_config.get('tcga', {}).get('clinical')
+        if tcga_clinical and Path(tcga_clinical).exists():
+            datasets_to_process.append('tcga_brca_data')
+        else:
+            print(f"[INFO] TCGA clinical file not found, skipping TCGA survival analysis")
+            print(f"       Expected: {tcga_clinical}")
+        
+        # Check GSE96058 (optional - skip if not available)
+        gse_clinical = dataset_config.get('gse96058', {}).get('clinical')
+        if gse_clinical and Path(gse_clinical).exists():
+            datasets_to_process.append('gse96058_data')
+        else:
+            print(f"[INFO] GSE96058 clinical file not found, skipping GSE96058 survival analysis")
+            if gse_clinical:
+                print(f"       Expected: {gse_clinical}")
+            else:
+                print(f"       No clinical file path configured for GSE96058")
+        
+        if not datasets_to_process:
+            print("\n[WARNING] No datasets with clinical data available for survival analysis")
+            print("          Survival analysis requires clinical files with OS_time and OS_event columns")
+            print("          Skipping survival analysis step")
+            return
+        
+        print(f"\n[INFO] Processing survival analysis for: {datasets_to_process}")
+        
+        for dataset_name in datasets_to_process:
+            cluster_file = clustering_dir / f"{dataset_name}_communities.npy"
+            target_file = processed_dir / f"{dataset_name}_targets.pkl"
+
+            if not cluster_file.exists() or not target_file.exists():
+                print(f"[SKIP] Survival analysis for {dataset_name}: Missing clustering or targets")
+                continue
+
+            print(f"\n[Survival] Processing dataset: {dataset_name}")
+
+            # Load clusters
+            communities = np.load(cluster_file)
+            if communities.ndim == 2:
+                communities = np.argmax(communities, axis=1)
+            communities = communities.flatten()
+
+            # Load targets to get sample names
+            with open(target_file, 'rb') as f:
+                targets_data = pickle.load(f)
+            
+            # Get sample names from targets
+            sample_names = targets_data.get('sample_names', None)
+            if sample_names is None:
+                print(f"[Warning] No sample_names in {target_file}, using indices")
+                sample_names = [f"sample_{i}" for i in range(len(communities))]
+            else:
+                # Ensure sample_names is a list/array
+                if isinstance(sample_names, np.ndarray):
+                    sample_names = sample_names.tolist()
+                if len(sample_names) != len(communities):
+                    print(f"[Warning] Mismatch: {len(sample_names)} sample names vs {len(communities)} clusters")
+                    print(f"  Using indices instead")
+                    sample_names = [f"sample_{i}" for i in range(len(communities))]
+
+            cluster_assignments = pd.DataFrame({
+                'sample_id': sample_names,
+                'cluster': communities
+            })
+
+            # Try to load clinical data from targets first
+            clinical_df = targets_data.get('clinical', None)
+            
+            # If not in targets, load from original clinical file
+            if clinical_df is None:
+                print(f"    Clinical data not in targets.pkl, loading from original file...")
+                dataset_config = config.get('dataset_preparation', {})
+                
+                if dataset_name == 'tcga_brca_data':
+                    clinical_file = dataset_config.get('tcga', {}).get('clinical')
+                    dataset_type = 'tcga'
+                elif dataset_name == 'gse96058_data':
+                    clinical_file = dataset_config.get('gse96058', {}).get('clinical')
+                    dataset_type = 'gse96058'
+                else:
+                    clinical_file = None
+                    dataset_type = None
+                
+                if clinical_file and Path(clinical_file).exists():
+                    clinical_df = load_clinical_data(clinical_file, sample_names, dataset_type=dataset_type)
+                else:
+                    if clinical_file:
+                        print(f"    [SKIP] Clinical file not found: {clinical_file}")
+                    else:
+                        print(f"    [SKIP] No clinical file path in config for {dataset_name}")
+                    print(f"    Survival analysis requires clinical data with OS_time and OS_event columns")
+                    continue
+
+            if clinical_df is None:
+                print(f"[SKIP] Could not load clinical data for {dataset_name}")
+                continue
+
+            # Ensure clinical_df is a DataFrame
+            if not isinstance(clinical_df, pd.DataFrame):
+                print(f"[SKIP] Clinical data is not a DataFrame")
+                continue
+
+            # Check if sample_id column exists in clinical data
+            if 'sample_id' not in clinical_df.columns:
+                print(f"[SKIP] Clinical data missing 'sample_id' column")
+                print(f"       Available columns: {list(clinical_df.columns)}")
+                continue
+
+            # Run survival pipeline
+            try:
+                df, log_df, cph = survival_evaluation(
+                    cluster_assignments=cluster_assignments,
+                    clinical_df=clinical_df,
+                    output_dir=str(survival_output_dir),
+                    id_col='sample_id',
+                    cluster_col='cluster',
+                    adjust_cols=['age', 'stage'],
+                    dataset_name=dataset_name
+                )
+                print(f"[OK] Survival analysis complete for {dataset_name}")
+            except Exception as e:
+                print(f"[ERROR] Survival analysis failed for {dataset_name}: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
+
     # Step 6: Visualization
     if 'visualize' in steps_to_run:
         print("\n" + "="*80)
@@ -441,12 +660,14 @@ def main():
     print("  🤖 Classification: results/classification/")
     print("  🔍 Interpretation: results/interpretation/")
     print("  🔗 Cross-dataset:  results/cross_dataset/")
+    print("  💊 Survival:       results/survival/")
     print("\nKey findings:")
     print("  • Check ARI/NMI scores in evaluation output")
     print("  • View t-SNE/UMAP plots to see cluster separation")
     print("  • Review confusion matrices and ROC curves for classification performance")
     print("  • Check interpretation results for biological significance")
     print("  • Examine cross-dataset correlations for consistency")
+    print("  • Review survival curves and Cox models for prognostic significance")
     print("="*80)
 
 

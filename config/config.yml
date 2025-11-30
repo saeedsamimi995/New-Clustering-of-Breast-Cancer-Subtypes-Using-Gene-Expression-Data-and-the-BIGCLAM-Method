@@ -126,7 +126,7 @@ classifiers:
         learning_rate: 0.0001  # Best from tuning (reduced from 0.001)
         patience: 10
         weight_decay: 0.0001
-        dropout_rate: 0.3  # Best from tuning
+        dropout_rate: 0.6  # Best from tuning
         hidden_layers: [512, 256, 128, 64]  # Best from tuning (reduced from 6 to 4 layers)
         use_augmentation: true  # Enable data augmentation to balance classes
         use_class_weights: true  # Enable class weights for imbalanced classes
