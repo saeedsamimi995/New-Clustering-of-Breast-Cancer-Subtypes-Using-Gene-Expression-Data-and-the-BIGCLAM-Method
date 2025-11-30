@@ -32,7 +32,7 @@ from src.clustering import cluster_all_graphs
 from src.evaluation import evaluate_all_datasets, survival_evaluation
 from src.evaluation.survival_evaluator import load_tcga_clinical, load_gse96058_clinical
 from src.visualization import create_all_visualizations
-from src.interpretation import interpret_results, analyze_overlap
+from src.interpretation import interpret_results, analyze_overlap, biological_interpretation_pipeline
 from src.analysis import analyze_cross_dataset_consistency, run_grid_search
 from src.classifiers import validate_clustering_with_classifiers
 
@@ -51,7 +51,7 @@ def main():
     parser.add_argument('--skip_classification', action='store_true', help='Skip classification validation')
     parser.add_argument('--steps', nargs='+', choices=[
         'preprocess', 'graph', 'cluster', 'evaluate', 
-        'visualize', 'interpret', 'cross_dataset', 'classify', 'grid_search', 'survival'
+        'visualize', 'interpret', 'biological_interpretation', 'cross_dataset', 'classify', 'grid_search', 'survival'
     ], help='Run specific steps only')
     
     args = parser.parse_args()
@@ -68,7 +68,7 @@ def main():
         steps_to_run = args.steps
     else:
         steps_to_run = ['preprocess', 'graph', 'cluster', 'evaluate', 
-                       'visualize', 'interpret', 'cross_dataset', 'classify', 'survival']
+                       'visualize', 'interpret', 'biological_interpretation', 'cross_dataset', 'classify', 'survival']
     
     # Special case: grid_search runs its own pipeline (starts from data_preprocessing.py)
     # NOTE: Grid search ONLY uses prepared CSV files (*_target_added.csv) as input.
@@ -640,7 +640,38 @@ def main():
             
             print(f"\n[Saved] Interpretation results to: {interpretation_output_dir / f'{dataset_name}_interpretation.pkl'}")
     
-    # Step 8: Cross-Dataset Analysis
+    # Step 8: Biological Interpretation
+    if 'biological_interpretation' in steps_to_run:
+        print("\n" + "="*80)
+        print("STEP 8: BIOLOGICAL INTERPRETATION")
+        print("="*80)
+        
+        dataset_config = config.get('dataset_preparation', {})
+        
+        # Run for each dataset
+        for dataset_name in ['tcga', 'gse96058']:
+            dataset_info = dataset_config.get(dataset_name, {})
+            if not dataset_info:
+                print(f"\n[Skip] {dataset_name}: No configuration found")
+                continue
+            
+            print(f"\n[Running] Biological interpretation for {dataset_name}...")
+            try:
+                biological_interpretation_pipeline(
+                    dataset_name=dataset_name,
+                    processed_dir='data/processed',
+                    clustering_dir='data/clusterings',
+                    output_dir='results/biological_interpretation',
+                    log2fc_threshold=1.0,
+                    pvalue_threshold=0.05,
+                    use_original_data=True  # Use original data to include all genes
+                )
+            except Exception as e:
+                print(f"[Error] Failed to run biological interpretation for {dataset_name}: {e}")
+                import traceback
+                traceback.print_exc()
+    
+    # Step 9: Cross-Dataset Analysis
     if 'cross_dataset' in steps_to_run:
         print("\n" + "="*80)
         print("STEP 8: CROSS-DATASET CONSISTENCY ANALYSIS")
@@ -659,6 +690,7 @@ def main():
     print("  📈 Visualizations: results/visualization/")
     print("  🤖 Classification: results/classification/")
     print("  🔍 Interpretation: results/interpretation/")
+    print("  🧬 Biological:     results/biological_interpretation/")
     print("  🔗 Cross-dataset:  results/cross_dataset/")
     print("  💊 Survival:       results/survival/")
     print("\nKey findings:")
@@ -666,6 +698,8 @@ def main():
     print("  • View t-SNE/UMAP plots to see cluster separation")
     print("  • Review confusion matrices and ROC curves for classification performance")
     print("  • Check interpretation results for biological significance")
+    print("  • Review differential expression and pathway enrichment results")
+    print("  • Examine cell-type signature scores for each cluster")
     print("  • Examine cross-dataset correlations for consistency")
     print("  • Review survival curves and Cox models for prognostic significance")
     print("="*80)

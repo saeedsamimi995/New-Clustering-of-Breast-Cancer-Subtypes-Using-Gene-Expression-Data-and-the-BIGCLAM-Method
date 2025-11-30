@@ -14,6 +14,8 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
+import seaborn as sns
+from matplotlib.gridspec import GridSpec
 
 from lifelines import KaplanMeierFitter, CoxPHFitter
 from lifelines.statistics import logrank_test
@@ -107,41 +109,435 @@ def prepare_survival_dataframe(cluster_assignments, clinical_df,
 
 def plot_kaplan_meier(df, cluster_col="cluster", time_col="OS_time",
                       event_col="OS_event", output_dir="results/survival",
-                      dataset_name=None):
+                      dataset_name=None, show_ci=True):
     """
-    Generate Kaplan–Meier curves grouped by cluster.
+    Generate Kaplan–Meier curves grouped by cluster with confidence intervals.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     km = KaplanMeierFitter()
+    
+    # Set style
+    sns.set_style("whitegrid")
+    plt.rcParams['figure.dpi'] = 300
+    plt.rcParams['savefig.dpi'] = 300
 
-    plt.figure(figsize=(9, 6))
-    for group in sorted(df[cluster_col].unique()):
+    fig, ax = plt.subplots(figsize=(10, 7))
+    
+    # Color palette for clusters
+    clusters = sorted(df[cluster_col].unique())
+    colors = plt.cm.tab10(np.linspace(0, 1, len(clusters)))
+    
+    for idx, group in enumerate(clusters):
         mask = df[cluster_col] == group
         n_samples = mask.sum()
+        n_events = df.loc[mask, event_col].sum()
+        
         km.fit(
             df.loc[mask, time_col],
             df.loc[mask, event_col],
-            label=f"Cluster {group} (n={n_samples})"
+            label=f"Cluster {group} (n={n_samples}, events={n_events})"
         )
-        km.plot_survival_function()
+        
+        if show_ci:
+            km.plot_survival_function(ax=ax, ci_show=True, color=colors[idx], linewidth=2.5)
+        else:
+            km.plot_survival_function(ax=ax, ci_show=False, color=colors[idx], linewidth=2.5)
 
     title = "Kaplan–Meier Survival by BIGCLAM Communities"
     if dataset_name:
-        title += f" - {dataset_name}"
-    plt.title(title)
-    plt.xlabel("Time (days)")
-    plt.ylabel("Survival probability")
-    plt.grid(True)
-    plt.legend()
+        title += f" - {dataset_name.upper()}"
+    ax.set_title(title, fontsize=14, fontweight='bold', pad=15)
+    ax.set_xlabel("Time (days)", fontsize=12)
+    ax.set_ylabel("Survival Probability", fontsize=12)
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc='best', fontsize=10, framealpha=0.9)
+    ax.set_ylim([0, 1.05])
 
     filename = "km_survival.png"
     if dataset_name:
         filename = f"{dataset_name}_km_survival.png"
 
-    plt.savefig(output_dir / filename, dpi=300, bbox_inches="tight")
+    plt.tight_layout()
+    plt.savefig(output_dir / filename, dpi=300, bbox_inches="tight", facecolor='white')
     print(f"[Saved] Kaplan–Meier plot → {output_dir/filename}")
+    plt.close()
+
+
+def plot_hazard_ratio_forest(cph, output_dir="results/survival", dataset_name=None):
+    """
+    Create a forest plot of hazard ratios from Cox model.
+    
+    Args:
+        cph: CoxPHFitter model object
+        output_dir: Output directory
+        dataset_name: Optional dataset name
+    """
+    if cph is None:
+        print("[Warning] No Cox model available for forest plot")
+        return
+    
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Get summary
+    summary = cph.summary.copy()
+    
+    # Filter to cluster variables only (exclude adjustment variables for main plot)
+    cluster_vars = [v for v in summary.index if 'cluster' in v.lower() or v.startswith('cluster')]
+    if not cluster_vars:
+        # Try to find cluster-related variables
+        cluster_vars = [v for v in summary.index if any(c.isdigit() for c in str(v))]
+    
+    if not cluster_vars:
+        print("[Warning] No cluster variables found in Cox model for forest plot")
+        return
+    
+    # Find column names (lifelines uses different column names)
+    available_cols = summary.columns.tolist()
+    hr_col = None
+    lower_col = None
+    upper_col = None
+    p_col = None
+    
+    for col in available_cols:
+        col_lower = str(col).lower()
+        if 'exp(coef)' in col_lower or 'hazard' in col_lower:
+            hr_col = col
+        if 'lower' in col_lower and '95' in str(col):
+            lower_col = col
+        if 'upper' in col_lower and '95' in str(col):
+            upper_col = col
+        if col_lower == 'p' or 'p-value' in col_lower:
+            p_col = col
+    
+    if not hr_col or not lower_col or not upper_col or not p_col:
+        print(f"[Warning] Missing required columns. Available: {available_cols}")
+        return
+    
+    # Create forest plot
+    fig, ax = plt.subplots(figsize=(10, max(6, len(cluster_vars) * 0.8)))
+    
+    # Extract data
+    variables = []
+    hr_values = []
+    ci_lower = []
+    ci_upper = []
+    p_values = []
+    
+    for var in cluster_vars:
+        if var in summary.index:
+            variables.append(str(var).replace('cluster_', 'Cluster ').replace('_', ' '))
+            hr = summary.loc[var, hr_col]
+            hr_lower = summary.loc[var, lower_col]
+            hr_upper = summary.loc[var, upper_col]
+            pval = summary.loc[var, p_col]
+            
+            hr_values.append(hr)
+            ci_lower.append(hr_lower)
+            ci_upper.append(hr_upper)
+            p_values.append(pval)
+    
+    if not variables:
+        plt.close()
+        return
+    
+    # Create forest plot
+    y_pos = np.arange(len(variables))
+    
+    # Plot hazard ratios with confidence intervals
+    for i, (var, hr, lower, upper) in enumerate(zip(variables, hr_values, ci_lower, ci_upper)):
+        # Color based on significance
+        color = '#d73027' if p_values[i] < 0.05 else '#4575b4'
+        
+        # Plot CI
+        ax.plot([lower, upper], [i, i], color=color, linewidth=2, alpha=0.7)
+        # Plot HR point
+        ax.scatter(hr, i, color=color, s=100, zorder=5, edgecolors='black', linewidth=1.5)
+    
+    # Reference line at HR=1
+    ax.axvline(1, color='black', linestyle='--', linewidth=1, label='HR = 1.0')
+    
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(variables)
+    ax.set_xlabel('Hazard Ratio (95% CI)', fontsize=12)
+    ax.set_title(f'Hazard Ratio Forest Plot', fontsize=14, fontweight='bold', pad=15)
+    if dataset_name:
+        ax.set_title(f'Hazard Ratio Forest Plot - {dataset_name.upper()}', 
+                    fontsize=14, fontweight='bold', pad=15)
+    ax.grid(True, alpha=0.3, axis='x')
+    ax.legend()
+    
+    # Add p-value annotations
+    for i, (var, hr, pval) in enumerate(zip(variables, hr_values, p_values)):
+        sig = '***' if pval < 0.001 else '**' if pval < 0.01 else '*' if pval < 0.05 else 'ns'
+        ax.text(hr, i, f'  {sig}', va='center', fontsize=9, fontweight='bold')
+    
+    plt.tight_layout()
+    filename = "hazard_ratio_forest.png"
+    if dataset_name:
+        filename = f"{dataset_name}_hazard_ratio_forest.png"
+    plt.savefig(output_dir / filename, dpi=300, bbox_inches="tight", facecolor='white')
+    print(f"[Saved] Hazard ratio forest plot → {output_dir/filename}")
+    plt.close()
+
+
+def plot_logrank_heatmap(logrank_df, output_dir="results/survival", dataset_name=None):
+    """
+    Create a heatmap of log-rank test p-values between clusters.
+    
+    Args:
+        logrank_df: DataFrame with log-rank test results
+        output_dir: Output directory
+        dataset_name: Optional dataset name
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    if logrank_df is None or len(logrank_df) == 0:
+        print("[Warning] No log-rank test results available for heatmap")
+        return
+    
+    # Create matrix of p-values
+    clusters = sorted(set(logrank_df['cluster_A'].unique()) | set(logrank_df['cluster_B'].unique()))
+    n_clusters = len(clusters)
+    
+    p_matrix = np.ones((n_clusters, n_clusters))
+    
+    for _, row in logrank_df.iterrows():
+        i = clusters.index(row['cluster_A'])
+        j = clusters.index(row['cluster_B'])
+        p_matrix[i, j] = row['p_value']
+        p_matrix[j, i] = row['p_value']  # Symmetric
+    
+    # Set diagonal to 1 (self-comparison)
+    np.fill_diagonal(p_matrix, 1.0)
+    
+    # Create heatmap
+    fig, ax = plt.subplots(figsize=(max(6, n_clusters * 1.2), max(5, n_clusters * 1.0)))
+    
+    # Create mask for upper triangle (to avoid redundancy)
+    mask = np.triu(np.ones_like(p_matrix, dtype=bool), k=1)
+    
+    sns.heatmap(
+        p_matrix,
+        annot=True,
+        fmt='.3f',
+        cmap='RdYlGn_r',
+        vmin=0,
+        vmax=0.05,
+        center=0.025,
+        square=True,
+        mask=mask,
+        cbar_kws={'label': 'p-value'},
+        ax=ax,
+        linewidths=0.5,
+        linecolor='gray',
+        xticklabels=[f'C{c}' for c in clusters],
+        yticklabels=[f'C{c}' for c in clusters]
+    )
+    
+    title = "Log-Rank Test P-Values (Pairwise Comparisons)"
+    if dataset_name:
+        title += f" - {dataset_name.upper()}"
+    ax.set_title(title, fontsize=14, fontweight='bold', pad=15)
+    ax.set_xlabel('Cluster', fontsize=12)
+    ax.set_ylabel('Cluster', fontsize=12)
+    
+    plt.tight_layout()
+    filename = "logrank_heatmap.png"
+    if dataset_name:
+        filename = f"{dataset_name}_logrank_heatmap.png"
+    plt.savefig(output_dir / filename, dpi=300, bbox_inches="tight", facecolor='white')
+    print(f"[Saved] Log-rank heatmap → {output_dir/filename}")
+    plt.close()
+
+
+def create_survival_summary_figure(df, logrank_df, cph, cluster_col="cluster",
+                                  time_col="OS_time", event_col="OS_event",
+                                  output_dir="results/survival", dataset_name=None):
+    """
+    Create a comprehensive summary figure with multiple survival visualizations.
+    
+    Args:
+        df: Merged survival dataframe
+        logrank_df: Log-rank test results
+        cph: Cox model object
+        cluster_col: Cluster column name
+        time_col: Time column name
+        event_col: Event column name
+        output_dir: Output directory
+        dataset_name: Optional dataset name
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    print(f"\n[Visualization] Creating survival summary figure for {dataset_name or 'dataset'}...")
+    
+    # Set style
+    sns.set_style("whitegrid")
+    plt.rcParams['figure.dpi'] = 300
+    plt.rcParams['savefig.dpi'] = 300
+    
+    # Create figure with subplots
+    fig = plt.figure(figsize=(16, 12))
+    gs = GridSpec(3, 2, figure=fig, hspace=0.35, wspace=0.3)
+    
+    clusters = sorted(df[cluster_col].unique())
+    colors = plt.cm.tab10(np.linspace(0, 1, len(clusters)))
+    
+    # 1. Kaplan-Meier curves (top left, spans 2 columns)
+    ax1 = fig.add_subplot(gs[0, :])
+    km = KaplanMeierFitter()
+    
+    for idx, group in enumerate(clusters):
+        mask = df[cluster_col] == group
+        n_samples = mask.sum()
+        n_events = df.loc[mask, event_col].sum()
+        
+        km.fit(
+            df.loc[mask, time_col],
+            df.loc[mask, event_col],
+            label=f"Cluster {group} (n={n_samples}, events={n_events})"
+        )
+        km.plot_survival_function(ax=ax1, ci_show=True, color=colors[idx], linewidth=2.5)
+    
+    ax1.set_title('Kaplan-Meier Survival Curves', fontsize=12, fontweight='bold', pad=10)
+    ax1.set_xlabel('Time (days)', fontsize=10)
+    ax1.set_ylabel('Survival Probability', fontsize=10)
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(loc='best', fontsize=9, framealpha=0.9)
+    ax1.set_ylim([0, 1.05])
+    
+    # 2. Hazard ratio forest plot (middle left)
+    ax2 = fig.add_subplot(gs[1, 0])
+    if cph is not None:
+        try:
+            summary = cph.summary.copy()
+            cluster_vars = [v for v in summary.index if 'cluster' in v.lower() or any(c.isdigit() for c in v)]
+            
+            if cluster_vars:
+                variables = []
+                hr_values = []
+                ci_lower = []
+                ci_upper = []
+                p_values = []
+                
+                for var in cluster_vars[:5]:  # Limit to 5 for readability
+                    if var in summary.index:
+                        variables.append(var.replace('cluster_', 'C').replace('_', ' '))
+                        hr_values.append(summary.loc[var, 'exp(coef)'])
+                        ci_lower.append(summary.loc[var, 'lower 0.95'])
+                        ci_upper.append(summary.loc[var, 'upper 0.95'])
+                        p_values.append(summary.loc[var, 'p'])
+                
+                if variables:
+                    y_pos = np.arange(len(variables))
+                    for i, (hr, lower, upper) in enumerate(zip(hr_values, ci_lower, ci_upper)):
+                        color = '#d73027' if p_values[i] < 0.05 else '#4575b4'
+                        ax2.plot([lower, upper], [i, i], color=color, linewidth=2, alpha=0.7)
+                        ax2.scatter(hr, i, color=color, s=80, zorder=5, edgecolors='black', linewidth=1)
+                    
+                    ax2.axvline(1, color='black', linestyle='--', linewidth=1)
+                    ax2.set_yticks(y_pos)
+                    ax2.set_yticklabels(variables, fontsize=9)
+                    ax2.set_xlabel('Hazard Ratio', fontsize=10)
+                    ax2.set_title('Hazard Ratios (Cox Model)', fontsize=11, fontweight='bold')
+                    ax2.grid(True, alpha=0.3, axis='x')
+        except:
+            ax2.text(0.5, 0.5, 'Cox model\nnot available', ha='center', va='center', fontsize=11)
+            ax2.set_xticks([])
+            ax2.set_yticks([])
+    else:
+        ax2.text(0.5, 0.5, 'Cox model\nnot available', ha='center', va='center', fontsize=11)
+        ax2.set_xticks([])
+        ax2.set_yticks([])
+    
+    # 3. Log-rank p-values (middle right)
+    ax3 = fig.add_subplot(gs[1, 1])
+    if logrank_df is not None and len(logrank_df) > 0:
+        # Create bar plot of p-values
+        logrank_df_sorted = logrank_df.sort_values('p_value')
+        comparisons = [f"C{int(row['cluster_A'])} vs C{int(row['cluster_B'])}" 
+                      for _, row in logrank_df_sorted.iterrows()]
+        p_vals = logrank_df_sorted['p_value'].values
+        
+        colors_bar = ['#d73027' if p < 0.05 else '#4575b4' for p in p_vals]
+        bars = ax3.barh(range(len(comparisons)), p_vals, color=colors_bar, alpha=0.7)
+        ax3.set_yticks(range(len(comparisons)))
+        ax3.set_yticklabels(comparisons, fontsize=9)
+        ax3.set_xlabel('p-value', fontsize=10)
+        ax3.set_title('Log-Rank Test Results', fontsize=11, fontweight='bold')
+        ax3.axvline(0.05, color='red', linestyle='--', linewidth=1, label='p=0.05')
+        ax3.legend(fontsize=8)
+        ax3.grid(True, alpha=0.3, axis='x')
+    else:
+        ax3.text(0.5, 0.5, 'Log-rank results\nnot available', ha='center', va='center', fontsize=11)
+        ax3.set_xticks([])
+        ax3.set_yticks([])
+    
+    # 4. Cluster sizes and events (bottom left)
+    ax4 = fig.add_subplot(gs[2, 0])
+    cluster_sizes = df[cluster_col].value_counts().sort_index()
+    cluster_events = df.groupby(cluster_col)[event_col].sum().sort_index()
+    
+    x = np.arange(len(clusters))
+    width = 0.35
+    
+    ax4.bar(x - width/2, [cluster_sizes.get(c, 0) for c in clusters], 
+           width, label='Total', color='steelblue', alpha=0.7)
+    ax4.bar(x + width/2, [cluster_events.get(c, 0) for c in clusters], 
+           width, label='Events', color='coral', alpha=0.7)
+    
+    ax4.set_xticks(x)
+    ax4.set_xticklabels([f'C{c}' for c in clusters])
+    ax4.set_ylabel('Count', fontsize=10)
+    ax4.set_title('Cluster Sizes and Events', fontsize=11, fontweight='bold')
+    ax4.legend(fontsize=9)
+    ax4.grid(True, alpha=0.3, axis='y')
+    
+    # 5. Summary statistics (bottom right)
+    ax5 = fig.add_subplot(gs[2, 1])
+    ax5.axis('off')
+    
+    # Calculate summary stats
+    total_samples = len(df)
+    total_events = df[event_col].sum()
+    median_survival = df[time_col].median()
+    n_clusters = df[cluster_col].nunique()
+    
+    summary_text = f"""
+    Dataset: {dataset_name.upper() if dataset_name else 'Dataset'}
+    Total Samples: {total_samples}
+    Total Events: {total_events}
+    Median Survival: {median_survival:.0f} days
+    Number of Clusters: {n_clusters}
+    """
+    
+    if cph is not None:
+        try:
+            summary_text += f"\nCox Model: Fitted"
+        except:
+            summary_text += f"\nCox Model: Not available"
+    
+    if logrank_df is not None and len(logrank_df) > 0:
+        sig_tests = (logrank_df['p_value'] < 0.05).sum()
+        summary_text += f"\nSignificant Log-Rank Tests: {sig_tests}/{len(logrank_df)}"
+    
+    ax5.text(0.1, 0.5, summary_text, fontsize=11, verticalalignment='center',
+            family='monospace', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    ax5.set_title('Summary Statistics', fontsize=11, fontweight='bold')
+    
+    plt.suptitle(f'{dataset_name.upper() if dataset_name else "Survival"} Analysis Summary', 
+                fontsize=16, fontweight='bold', y=0.995)
+    
+    filename = "survival_summary.png"
+    if dataset_name:
+        filename = f"{dataset_name}_survival_summary.png"
+    
+    plt.savefig(output_dir / filename, dpi=300, bbox_inches="tight", facecolor='white')
+    print(f"[Saved] Survival summary figure → {output_dir/filename}")
     plt.close()
 
 
@@ -332,6 +728,12 @@ def survival_evaluation(cluster_assignments,
     logrank_path = dataset_output_dir / "logrank_results.csv"
     log_df.to_csv(logrank_path, index=False)
     print(f"[Saved] Log-rank results → {logrank_path}")
+    
+    # Create log-rank heatmap
+    try:
+        plot_logrank_heatmap(log_df, output_dir=dataset_output_dir, dataset_name=dataset_name)
+    except Exception as e:
+        print(f"[Warning] Failed to create log-rank heatmap: {e}")
 
     # Determine adjustment columns - check what's actually available
     final_adjust_cols = None
@@ -368,6 +770,12 @@ def survival_evaluation(cluster_assignments,
             summary_path = dataset_output_dir / "cox_summary.csv"
             cph.summary.to_csv(summary_path)
             print(f"[Saved] Cox model → {summary_path}")
+            
+            # Create hazard ratio forest plot
+            try:
+                plot_hazard_ratio_forest(cph, output_dir=dataset_output_dir, dataset_name=dataset_name)
+            except Exception as e:
+                print(f"[Warning] Failed to create hazard ratio forest plot: {e}")
         else:
             print("[Warning] Cox model returned None")
             cph = None
@@ -376,6 +784,21 @@ def survival_evaluation(cluster_assignments,
         import traceback
         traceback.print_exc()
         cph = None
+    
+    # Create comprehensive summary figure
+    try:
+        create_survival_summary_figure(
+            df, log_df, cph, 
+            cluster_col=cluster_col,
+            time_col="OS_time",
+            event_col="OS_event",
+            output_dir=dataset_output_dir,
+            dataset_name=dataset_name
+        )
+    except Exception as e:
+        print(f"[Warning] Failed to create survival summary figure: {e}")
+        import traceback
+        traceback.print_exc()
 
     return df, log_df, cph
 
