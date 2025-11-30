@@ -232,6 +232,7 @@ def main():
         
         bigclam_config = config.get('bigclam', {})
         max_communities = bigclam_config.get('max_communities', 10)
+        min_communities = bigclam_config.get('min_communities', 3)  # Default to 3 for major molecular programs
         iterations = bigclam_config.get('iterations', 100)
         lr = bigclam_config.get('learning_rate', 0.08)
         
@@ -265,15 +266,20 @@ def main():
                 if 'num_restarts' in ds_config:
                     num_restarts_dict[dataset] = int(ds_config['num_restarts'])
                     print(f"  {dataset}: num_restarts={ds_config['num_restarts']}")
+                if 'min_communities' in ds_config:
+                    print(f"  {dataset}: min_communities={ds_config['min_communities']}")
         
         print("\nOptimization settings:")
+        print(f"  Min communities: {min_communities} (for finer-grained subtyping than PAM50)")
+        print(f"  Max communities: {max_communities}")
         print(f"  Adaptive LR: {adaptive_lr}")
         print(f"  Adaptive iterations: {adaptive_iterations}")
         print(f"  Early stopping: {early_stopping} (patience={patience}, threshold={convergence_threshold})")
         print(f"  Default num_restarts: {default_num_restarts}")
         
         cluster_all_graphs(input_dir='data/graphs', output_dir='data/clusterings',
-                         max_communities=max_communities, iterations=iterations, lr=lr,
+                         max_communities=max_communities, min_communities=min_communities,
+                         iterations=iterations, lr=lr,
                          criterion_dict=criterion_dict if criterion_dict else None,
                          adaptive_lr=adaptive_lr, adaptive_iterations=adaptive_iterations,
                          early_stopping=early_stopping, convergence_threshold=convergence_threshold,

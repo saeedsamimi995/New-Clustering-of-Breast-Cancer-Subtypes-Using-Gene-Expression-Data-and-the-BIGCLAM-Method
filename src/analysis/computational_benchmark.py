@@ -114,7 +114,7 @@ def benchmark_clustering(adjacency_file, max_communities=10):
     import scipy.sparse as sp
     adjacency = sp.load_npz(adjacency_file)
     
-    communities, membership, optimal_k = cluster_data(
+    communities, membership, optimal_k, runtime_info = cluster_data(
         adjacency,
         max_communities=max_communities,
         iterations=100,

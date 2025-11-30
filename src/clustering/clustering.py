@@ -23,7 +23,7 @@ except ImportError:
     from src.bigclam.bigclam_model import train_bigclam
 
 
-def cluster_data(adjacency, max_communities=10, iterations=100, lr=0.08, criterion='BIC',
+def cluster_data(adjacency, max_communities=10, min_communities=1, iterations=100, lr=0.08, criterion='BIC',
                  adaptive_lr=True, adaptive_iterations=True, early_stopping=True,
                  convergence_threshold=1e-6, patience=10, num_restarts=1):
     """
@@ -32,6 +32,8 @@ def cluster_data(adjacency, max_communities=10, iterations=100, lr=0.08, criteri
     Args:
         adjacency: Adjacency matrix (sparse or dense)
         max_communities: Maximum number of communities to search
+        min_communities: Minimum number of communities to search (default: 1). 
+                        Set to 5 or higher for finer-grained subtyping than PAM50.
         iterations: Base number of optimization iterations
         lr: Base learning rate
         criterion: Model selection criterion ('AIC' or 'BIC')
@@ -43,9 +45,10 @@ def cluster_data(adjacency, max_communities=10, iterations=100, lr=0.08, criteri
         num_restarts: Number of random restarts per community number
         
     Returns:
-        tuple: (communities, membership_matrix, optimal_num_communities)
+        tuple: (communities, membership_matrix, optimal_num_communities, runtime_info)
     """
     print("\n[Clustering] Applying BIGCLAM...")
+    print(f"    Min communities: {min_communities}")
     print(f"    Max communities: {max_communities}")
     print(f"    Base iterations: {iterations}")
     print(f"    Base learning rate: {lr}")
@@ -60,6 +63,7 @@ def cluster_data(adjacency, max_communities=10, iterations=100, lr=0.08, criteri
     F, best_num_communities = train_bigclam(
         adjacency,
         max_communities=max_communities,
+        min_communities=min_communities,
         iterations=iterations,
         lr=lr,
         criterion=criterion,
@@ -178,7 +182,7 @@ def load_clustering_results(input_file):
 
 
 def cluster_all_graphs(input_dir='data/graphs', output_dir='data/clusterings',
-                      max_communities=10, iterations=100, lr=0.08, criterion_dict=None,
+                      max_communities=10, min_communities=1, iterations=100, lr=0.08, criterion_dict=None,
                       adaptive_lr=True, adaptive_iterations=True, early_stopping=True,
                       convergence_threshold=1e-6, patience=10, num_restarts_dict=None,
                       dataset_specific_config=None):
@@ -248,10 +252,14 @@ def cluster_all_graphs(input_dir='data/graphs', output_dir='data/clusterings',
         else:
             adjacency = np.load(graph_file)
         
+        # Get min_communities from dataset config or use default
+        dataset_min_communities = dataset_config.get('min_communities', min_communities)
+        
         # Cluster
         communities, membership, optimal_k, runtime_info = cluster_data(
             adjacency,
             max_communities=max_communities,
+            min_communities=dataset_min_communities,
             iterations=dataset_iterations,
             lr=dataset_lr,
             criterion=criterion,

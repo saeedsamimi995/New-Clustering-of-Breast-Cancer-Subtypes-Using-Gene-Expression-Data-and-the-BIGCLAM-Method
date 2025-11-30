@@ -54,8 +54,6 @@ Genes were ranked by log2 fold-change and analyzed using GSEA⁶ (weighted stati
 
 BIGCLAM optimization was implemented in PyTorch with Adam optimizer (lr = 0.08) and early stopping based on log-likelihood stabilization (convergence threshold: ΔlogL < 10⁻⁵ over 10 consecutive epochs). Hyperparameter sensitivity analysis and optimization trajectories are provided in Supplementary Figure Z. Analyses were executed on an 8-core CPU workstation (≥16GB RAM).
 
-**Note on Data Augmentation**: No data augmentation was applied to expression data used for BIGCLAM clustering, survival analysis, differential expression, or pathway enrichment. All core analyses were performed on original, unmodified expression profiles to preserve biological signal integrity. Augmentation (if used) was limited to optional classifier validation and was evaluated with and without augmentation to assess impact (see Supplementary Methods).
-
 ## References
 
 1. Cancer Genome Atlas Network. Comprehensive molecular portraits of human breast tumours. *Nature* 490, 61-70 (2012).

@@ -321,10 +321,11 @@ BIGCLAM identified clinically relevant molecular subtypes with distinct biologic
    - **Address**: Results are consistent across platforms
    - **Future**: Harmonize datasets using batch correction methods
 
-4. **Data augmentation**: Gaussian noise injection used for class balancing
+4. **Data augmentation**: SMOTE (Synthetic Minority Oversampling Technique) used for class balancing
    - **Address**: Ablation study demonstrates impact (see `results/augmentation_ablation/`)
-   - **Acknowledgment**: Augmentation is a preprocessing step for classifier training, not for clustering itself
-   - **Future**: Explore biologically plausible augmentation methods (e.g., SMOTE, VAE-based synthesis)
+   - **Method**: SMOTE generates synthetic samples by interpolating between existing samples in feature space, which is more biologically plausible than Gaussian noise for gene expression data
+   - **Validation**: Distribution preservation validated using Kolmogorov-Smirnov tests (≥80% of features must preserve original distribution)
+   - **Acknowledgment**: Augmentation is applied only to training data, not validation/test sets, and is a preprocessing step for classifier training, not for clustering itself
 
 ### Future Directions
 

@@ -168,14 +168,16 @@ def run_single_combination(
         criterion_config = bigclam_config.get('model_selection_criterion', {})
         criterion = criterion_config.get(dataset_name, criterion_config.get('default', 'BIC'))
         
-        # Get num_restarts for this dataset (from dataset_specific or default)
+        # Get num_restarts and min_communities for this dataset (from dataset_specific or default)
         dataset_specific_config = bigclam_config.get('dataset_specific', {})
         dataset_config = dataset_specific_config.get(dataset_name, {})
         num_restarts = int(dataset_config.get('num_restarts', bigclam_config.get('num_restarts', 1)))
+        min_communities = int(dataset_config.get('min_communities', bigclam_config.get('min_communities', 3)))
         
-        communities, membership, optimal_k = cluster_data(
+        communities, membership, optimal_k, runtime_info = cluster_data(
             adjacency,
             max_communities=max_communities,
+            min_communities=min_communities,
             iterations=iterations,
             lr=lr,
             criterion=criterion,
@@ -188,6 +190,9 @@ def run_single_combination(
         )
         
         n_communities = len(set(communities))
+        
+        # Store runtime info in results
+        results['runtime_info'] = runtime_info
         
         # Step 4: Evaluate
         eval_output = evaluate_clustering(

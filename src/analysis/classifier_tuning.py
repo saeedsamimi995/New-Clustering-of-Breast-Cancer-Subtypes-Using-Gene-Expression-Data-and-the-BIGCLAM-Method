@@ -168,7 +168,7 @@ def tune_mlp_parameters(X_train, y_train, X_valid, y_valid, X_test, y_test,
     # Augment training data for balanced classes
     print("\n[Augmenting training data for balanced classes...]")
     from src.analysis.augmentation_ablation import augment_data
-    X_train_aug, y_train_aug = augment_data(X_train, y_train, noise_std=0.1)
+    X_train_aug, y_train_aug, _ = augment_data(X_train, y_train, noise_std=0.1)
     
     # One-hot encode augmented training data
     y_train_aug_onehot = oe.fit_transform(y_train_aug.reshape(-1, 1))
@@ -287,7 +287,7 @@ def tune_classifiers_for_dataset(dataset_name, processed_dir='data/processed',
     # Augment training data for balanced classes (used for both SVM and MLP)
     print("\n[Augmenting training data for balanced classes...]")
     from src.analysis.augmentation_ablation import augment_data
-    X_train_aug, y_train_aug = augment_data(X_train, y_train, noise_std=0.1)
+    X_train_aug, y_train_aug, _ = augment_data(X_train, y_train, noise_std=0.1)
     
     # Show augmented distribution
     unique_aug, counts_aug = np.unique(y_train_aug, return_counts=True)

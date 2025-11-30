@@ -233,9 +233,9 @@ python src/analysis/computational_benchmark.py \
 #### 3. Data Augmentation Ablation Study
 Compares performance with and without data augmentation:
 - **Without augmentation**: Training on original imbalanced data
-- **With augmentation**: Training on balanced augmented data (Gaussian noise injection)
+- **With augmentation**: Training on balanced augmented data using SMOTE (Synthetic Minority Oversampling Technique)
 
-**Purpose**: Validates the impact of augmentation on model performance and justifies the augmentation strategy.
+**Purpose**: Validates the impact of augmentation on model performance and justifies the augmentation strategy. SMOTE generates synthetic samples by interpolating between existing samples in feature space, which is more biologically plausible than Gaussian noise for gene expression data.
 
 ```bash
 python src/analysis/augmentation_ablation.py --dataset gse96058_data
@@ -244,6 +244,7 @@ python src/analysis/augmentation_ablation.py --dataset gse96058_data
 **Output**: `results/augmentation_ablation/{dataset}_augmentation_ablation.csv`
 - Performance difference with/without augmentation
 - Impact on imbalanced classes
+- Distribution validation results (Kolmogorov-Smirnov tests)
 - Justification for augmentation approach
 
 #### 4. Cluster-to-PAM50 Mapping
@@ -437,7 +438,7 @@ Confusion matrices are computed across multiple runs (n=10) and averaged. Decima
 
 ### 12. `src/analysis/augmentation_ablation.py`
 - **Ablation study**: Compares performance with and without data augmentation
-- **Augmentation method**: Gaussian noise injection (σ = 0.1) to balance classes
+- **Augmentation method**: SMOTE (Synthetic Minority Oversampling Technique) to balance classes
 - **Impact analysis**: Performance difference, class balance effects
 - **Purpose**: Validates augmentation strategy and quantifies its impact
 - Outputs: `results/augmentation_ablation/{dataset}_augmentation_ablation.csv`
@@ -679,7 +680,7 @@ results/
 - **Graph construction**: Similarity calculation, adjacency matrix construction, threshold selection
 - **Adaptive model selection**: AIC/BIC selection based on dataset size
 - **Error estimation**: Confusion matrix averaging across multiple runs
-- **Data augmentation**: Gaussian noise injection methodology and impact analysis
+- **Data augmentation**: SMOTE-based augmentation methodology and impact analysis with distribution validation
 - **Cluster-to-PAM50 mapping**: Interpretability analysis and ground truth clarification (PAM50 vs Oncotree)
 
 ### Additional Validation Analyses

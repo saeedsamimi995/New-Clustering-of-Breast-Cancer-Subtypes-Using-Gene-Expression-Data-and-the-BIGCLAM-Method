@@ -2,7 +2,8 @@
 Data Augmentation Ablation Study
 
 Compares classification performance with and without data augmentation.
-Evaluates the impact of augmentation on model performance.
+Uses SMOTE (Synthetic Minority Oversampling Technique) for biologically plausible augmentation.
+Evaluates the impact of augmentation on model performance and validates distribution preservation.
 """
 
 import numpy as np
@@ -11,6 +12,7 @@ from pathlib import Path
 import pickle
 import sys
 import time
+from scipy import stats
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -19,50 +21,163 @@ from src.classifiers.classifiers import split_data, encode_labels
 from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score, f1_score, classification_report
 
+try:
+    from imblearn.over_sampling import SMOTE
+    SMOTE_AVAILABLE = True
+except ImportError:
+    SMOTE_AVAILABLE = False
+    print("[WARNING] imbalanced-learn not available. Install with: pip install imbalanced-learn")
 
-def augment_data(X, y, noise_std=0.1):
+
+def validate_distribution_preservation(X_original, X_augmented, feature_indices=None, alpha=0.05):
     """
-    Augment data by adding Gaussian noise.
+    Validate that augmentation preserves the original data distribution.
+    
+    Uses Kolmogorov-Smirnov test to compare distributions of original vs augmented data.
     
     Args:
-        X: Feature matrix
-        y: Labels
-        noise_std: Standard deviation of noise
+        X_original: Original feature matrix
+        X_augmented: Augmented feature matrix (includes original + synthetic)
+        feature_indices: Indices of features to test (None = test all, or sample subset)
+        alpha: Significance level for KS test
         
     Returns:
-        X_augmented, y_augmented
+        dict: Validation results including p-values and pass/fail status
     """
-    # Find max samples per class
-    unique_labels, counts = np.unique(y, return_counts=True)
-    #max_samples = counts.max()
-    max_samples = int(counts.mean() + counts.std())
+    # Extract only synthetic samples (augmented data minus original)
+    n_original = len(X_original)
+    X_synthetic = X_augmented[n_original:]
     
-    X_augmented = [X]
-    y_augmented = [y]
+    if len(X_synthetic) == 0:
+        return {'status': 'no_synthetic_samples', 'p_values': [], 'passed': True}
     
-    for label in unique_labels:
-        label_indices = np.where(y == label)[0]
-        n_current = len(label_indices)
-        n_needed = max_samples - n_current
+    # Sample features if too many (test up to 100 features for efficiency)
+    if feature_indices is None:
+        n_features = X_original.shape[1]
+        if n_features > 100:
+            feature_indices = np.random.choice(n_features, 100, replace=False)
+        else:
+            feature_indices = np.arange(n_features)
+    
+    p_values = []
+    passed_features = 0
+    
+    for feat_idx in feature_indices:
+        # KS test: compare distribution of original vs synthetic for this feature
+        ks_stat, p_value = stats.ks_2samp(
+            X_original[:, feat_idx],
+            X_synthetic[:, feat_idx]
+        )
+        p_values.append(p_value)
         
-        if n_needed > 0:
-            # Sample with replacement
-            sampled_indices = np.random.choice(label_indices, n_needed, replace=True)
-            
-            # Add noise
-            alpha = 0.2
-            lam = np.random.beta(alpha, alpha)
-            idx2 = np.random.choice(label_indices, n_needed, replace=True)
-            X_new = lam * X[sampled_indices] + (1-lam) * X[idx2]
-            y_new = y[sampled_indices]
-            
-            X_augmented.append(X_new)
-            y_augmented.append(y_new)
+        # Feature passes if p > alpha (distributions are not significantly different)
+        if p_value > alpha:
+            passed_features += 1
     
-    X_final = np.vstack(X_augmented)
-    y_final = np.hstack(y_augmented)
+    # Overall validation: at least 80% of features should preserve distribution
+    pass_rate = passed_features / len(feature_indices)
+    passed = pass_rate >= 0.80
     
-    return X_final, y_final
+    return {
+        'status': 'passed' if passed else 'failed',
+        'p_values': p_values,
+        'mean_p_value': np.mean(p_values),
+        'median_p_value': np.median(p_values),
+        'pass_rate': pass_rate,
+        'passed_features': passed_features,
+        'total_features_tested': len(feature_indices),
+        'passed': passed
+    }
+
+
+def augment_data(X, y, method='smote', k_neighbors=5, random_state=42, noise_std=None):
+    """
+    Augment data using SMOTE (Synthetic Minority Oversampling Technique).
+    
+    SMOTE generates synthetic samples by interpolating between existing samples
+    in the feature space, which is more biologically plausible than Gaussian noise
+    for gene expression data.
+    
+    Args:
+        X: Feature matrix (training data only)
+        y: Labels (training data only)
+        method: Augmentation method ('smote' or 'smote_nc' for nominal/continuous)
+        k_neighbors: Number of nearest neighbors for SMOTE
+        random_state: Random seed for reproducibility
+        noise_std: DEPRECATED - kept for backward compatibility, ignored
+        
+    Returns:
+        X_augmented, y_augmented: Augmented data (includes original + synthetic)
+        validation_results: Distribution validation results
+    """
+    if not SMOTE_AVAILABLE:
+        raise ImportError("imbalanced-learn is required for SMOTE. Install with: pip install imbalanced-learn")
+    
+    # Store original data
+    X_original = X.copy()
+    y_original = y.copy()
+    
+    # Find target sample size (mean + 1 std, or max if very imbalanced)
+    unique_labels, counts = np.unique(y, return_counts=True)
+    mean_count = counts.mean()
+    std_count = counts.std()
+    max_samples = int(mean_count + std_count)
+    
+    # Ensure we don't oversample too much (cap at 2x the mean)
+    max_samples = min(max_samples, int(mean_count * 2))
+    
+    print(f"  Target samples per class: {max_samples}")
+    print(f"  Current class distribution:")
+    for label, count in zip(unique_labels, counts):
+        print(f"    Class {label}: {count} samples")
+    
+    # Calculate desired sampling strategy
+    # We want each class to have at least max_samples samples
+    sampling_strategy_dict = {}
+    for label, count in zip(unique_labels, counts):
+        if count < max_samples:
+            sampling_strategy_dict[label] = max_samples
+        else:
+            # Don't oversample classes that already have enough samples
+            sampling_strategy_dict[label] = count
+    
+    # Ensure k < min class size
+    min_class_size = min(counts)
+    k_neighbors = min(k_neighbors, min_class_size - 1) if min_class_size > 1 else 1
+    
+    smote = SMOTE(
+        sampling_strategy=sampling_strategy_dict,
+        k_neighbors=k_neighbors,
+        random_state=random_state
+    )
+    
+    try:
+        X_augmented, y_augmented = smote.fit_resample(X, y)
+    except ValueError as e:
+        # Fallback: if SMOTE fails (e.g., too few samples), return original
+        print(f"  [WARNING] SMOTE failed: {e}")
+        print("  [FALLBACK] Using original data without augmentation")
+        return X_original, y_original, {'status': 'smote_failed', 'passed': False}
+    
+    # Validate distribution preservation
+    validation_results = validate_distribution_preservation(X_original, X_augmented)
+    
+    # Show results
+    unique_aug, counts_aug = np.unique(y_augmented, return_counts=True)
+    print(f"\n  Augmented class distribution:")
+    for label, count in zip(unique_aug, counts_aug):
+        print(f"    Class {label}: {count} samples")
+    
+    print(f"\n  Distribution validation:")
+    print(f"    Status: {validation_results['status']}")
+    print(f"    Pass rate: {validation_results['pass_rate']:.2%}")
+    print(f"    Mean p-value: {validation_results['mean_p_value']:.4f}")
+    print(f"    Median p-value: {validation_results['median_p_value']:.4f}")
+    
+    if not validation_results['passed']:
+        print(f"  [WARNING] Distribution validation failed. Augmentation may distort data.")
+    
+    return X_augmented, y_augmented, validation_results
 
 
 def compare_with_without_augmentation(dataset_name, processed_dir='data/processed',
@@ -182,9 +297,16 @@ def compare_with_without_augmentation(dataset_name, processed_dir='data/processe
     print("TRAINING WITH AUGMENTATION")
     print("-"*80)
     
-    # Augment training data only
-    print("\n  Augmenting training data...")
-    X_train_aug, y_train_aug = augment_data(X_train_no_aug, y_train_no_aug, noise_std=0.1)
+    # Augment training data only (NOT validation or test)
+    print("\n  Augmenting training data using SMOTE...")
+    print("  [IMPORTANT] Augmentation applied ONLY to training data, not validation/test")
+    
+    X_train_aug, y_train_aug, validation_results = augment_data(
+        X_train_no_aug, y_train_no_aug, 
+        method='smote', 
+        k_neighbors=5, 
+        random_state=42
+    )
     
     # Show augmented distribution
     unique_aug, counts_aug = np.unique(y_train_aug, return_counts=True)
@@ -234,7 +356,8 @@ def compare_with_without_augmentation(dataset_name, processed_dir='data/processe
             'accuracy': mlp_aug_results['test_accuracy'],
             'f1_macro': mlp_aug_results.get('test_f1', 0),
             'time': mlp_aug_time
-        }
+        },
+        'validation_results': validation_results  # Distribution validation
     }
     
     # ===== COMPARISON =====
@@ -265,6 +388,14 @@ def compare_with_without_augmentation(dataset_name, processed_dir='data/processe
     })
     
     print("\n" + comparison_df.to_string(index=False))
+    
+    # Print distribution validation summary
+    if 'validation_results' in results['with_augmentation']:
+        val_results = results['with_augmentation']['validation_results']
+        print(f"\nDistribution Validation:")
+        print(f"  Status: {val_results['status']}")
+        print(f"  Pass rate: {val_results['pass_rate']:.2%}")
+        print(f"  Mean p-value: {val_results['mean_p_value']:.4f}")
     
     # Save results
     results['comparison'] = comparison_df
@@ -304,4 +435,3 @@ if __name__ == "__main__":
         args.clustering_dir,
         args.output_dir
     )
-

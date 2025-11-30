@@ -70,7 +70,8 @@ python src/analysis/augmentation_ablation.py --dataset gse96058_data
 **Key Results**:
 - Performance difference with/without augmentation
 - Impact on imbalanced classes
-- Justification for augmentation strategy
+- Distribution validation (Kolmogorov-Smirnov tests)
+- Justification for SMOTE-based augmentation strategy
 
 ### 4. `src/analysis/method_comparison.py`
 **Purpose**: Compare BIGCLAM with other clustering methods.

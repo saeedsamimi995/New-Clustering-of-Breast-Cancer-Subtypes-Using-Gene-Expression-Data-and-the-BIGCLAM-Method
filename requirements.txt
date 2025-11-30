@@ -21,6 +21,9 @@ psutil>=5.9.0
 # Statistical analysis
 scipy>=1.10.0
 
+# Data augmentation
+imbalanced-learn>=0.11.0  # For SMOTE (Synthetic Minority Oversampling Technique)
+
 # Optional: Enhanced statistical analysis (for FDR correction)
 # statsmodels>=0.14.0
 

@@ -54,13 +54,13 @@ class BIGCLAM:
         
         print(f"Using device: {self.device}")
     
-    def train(self, A, max_communities=10, iterations=100, lr=0.08, criterion='BIC',
+    def train(self, A, max_communities=10, min_communities=1, iterations=100, lr=0.08, criterion='BIC',
               adaptive_lr=True, adaptive_iterations=True, early_stopping=True,
               convergence_threshold=1e-6, patience=10, num_restarts=1):
         """
         Train BIGCLAM model to automatically find optimal number of communities using AIC/BIC.
         
-        The model tests communities from 1 to max_communities and automatically selects
+        The model tests communities from min_communities to max_communities and automatically selects
         the optimal number based on Akaike Information Criterion (AIC) or Bayesian 
         Information Criterion (BIC). Lower score indicates better model fit with penalty 
         for complexity.
@@ -72,7 +72,8 @@ class BIGCLAM:
         
         Args:
             A (np.ndarray, scipy.sparse matrix, or torch.Tensor): Adjacency matrix (N x N).
-            max_communities (int): Maximum number of communities to test (searches 1 to this value).
+            max_communities (int): Maximum number of communities to test.
+            min_communities (int): Minimum number of communities to test (default: 1).
             iterations (int): Base number of optimization iterations per community number.
             lr (float): Base learning rate for Adam optimizer.
             criterion (str): Model selection criterion - 'AIC' or 'BIC' (default: 'BIC')
@@ -86,7 +87,7 @@ class BIGCLAM:
         Returns:
             tuple: (best_F, best_num_communities) where:
                 - best_F: Membership strength matrix (N x optimal_C) for optimal number of communities
-                - best_num_communities: Automatically determined optimal number of communities
+                - best_num_communities: Automatically determined optimal number of communities (≥ min_communities)
         """
         criterion = criterion.upper()  # Normalize to uppercase
         if criterion not in ['AIC', 'BIC']:
@@ -125,13 +126,20 @@ class BIGCLAM:
         else:
             adjusted_lr = lr
         
+        # Ensure min_communities <= max_communities
+        if min_communities > max_communities:
+            print(f"[WARNING] min_communities ({min_communities}) > max_communities ({max_communities}), setting min_communities = max_communities")
+            min_communities = max_communities
+        
         best_F = None
-        best_num_communities = 1
+        best_num_communities = min_communities
         best_score = float('inf')
         
         criterion_name = "Akaike" if criterion == 'AIC' else "Bayesian"
         penalty_formula = "2 × k" if criterion == 'AIC' else "log(N) × k"
-        print(f"\n[Searching optimal communities] Testing 1 to {max_communities} communities...")
+        print(f"\n[Searching optimal communities] Testing {min_communities} to {max_communities} communities...")
+        if min_communities > 1:
+            print(f"[Note] Minimum communities set to {min_communities} for finer-grained subtyping")
         print(f"Using {criterion} ({criterion_name} Information Criterion) for model selection")
         print(f"(Lower {criterion} = better fit with complexity penalty: {penalty_formula})")
         if criterion == 'BIC':
@@ -147,7 +155,7 @@ class BIGCLAM:
             print(f"Multiple restarts: {num_restarts} per community number")
         print()
         
-        for num_communities in range(1, max_communities + 1):
+        for num_communities in range(min_communities, max_communities + 1):
             # Adaptive iterations based on graph size and community number
             if adaptive_iterations:
                 if N < 1000:
@@ -278,18 +286,20 @@ class BIGCLAM:
             plt.show()
 
 
-def train_bigclam(A, max_communities=10, iterations=100, lr=0.08, device=None, criterion='BIC',
+def train_bigclam(A, max_communities=10, min_communities=1, iterations=100, lr=0.08, device=None, criterion='BIC',
                   adaptive_lr=True, adaptive_iterations=True, early_stopping=True,
                   convergence_threshold=1e-6, patience=10, num_restarts=1):
     """
     Convenience function to train BIGCLAM model with automatic community selection.
     
     Automatically finds optimal number of communities using AIC/BIC by testing
-    all values from 1 to max_communities and selecting the best.
+    all values from min_communities to max_communities and selecting the best.
     
     Args:
         A (np.ndarray or torch.Tensor): Adjacency matrix (N x N).
-        max_communities (int): Maximum number of communities to test (searches 1 to this value).
+        max_communities (int): Maximum number of communities to test.
+        min_communities (int): Minimum number of communities to test (default: 1).
+                              Set to 5 or higher for finer-grained subtyping than PAM50.
         iterations (int): Base number of optimization iterations per community number.
         lr (float): Base learning rate for Adam optimizer.
         device (torch.device, optional): Device to use (GPU if available, else CPU).
@@ -304,10 +314,10 @@ def train_bigclam(A, max_communities=10, iterations=100, lr=0.08, device=None, c
     Returns:
         tuple: (best_F, best_num_communities) where:
             - best_F: Membership strength matrix for optimal number of communities
-            - best_num_communities: Automatically determined optimal number (via AIC/BIC)
+            - best_num_communities: Automatically determined optimal number (via AIC/BIC, ≥ min_communities)
     """
     model = BIGCLAM(device=device)
-    return model.train(A, max_communities, iterations, lr, criterion,
+    return model.train(A, max_communities, min_communities, iterations, lr, criterion,
                       adaptive_lr, adaptive_iterations, early_stopping,
                       convergence_threshold, patience, num_restarts)
 

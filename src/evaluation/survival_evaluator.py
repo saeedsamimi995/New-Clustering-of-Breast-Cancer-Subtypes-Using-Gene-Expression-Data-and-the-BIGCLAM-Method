@@ -412,6 +412,12 @@ def create_survival_summary_figure(df, logrank_df, cph, cluster_col="cluster",
     ax1.legend(loc='best', fontsize=9, framealpha=0.9)
     ax1.set_ylim([0, 1.05])
     
+    # Add number-at-risk table
+    try:
+        at_risk_df = add_number_at_risk_table(ax1, df, time_col, event_col, cluster_col, n_timepoints=5)
+    except Exception as e:
+        print(f"[Warning] Could not add number-at-risk table: {e}")
+    
     # 2. Hazard ratio forest plot (middle left)
     ax2 = fig.add_subplot(gs[1, 0])
     if cph is not None:
@@ -420,19 +426,38 @@ def create_survival_summary_figure(df, logrank_df, cph, cluster_col="cluster",
             cluster_vars = [v for v in summary.index if 'cluster' in v.lower() or any(c.isdigit() for c in v)]
             
             if cluster_vars:
-                variables = []
-                hr_values = []
-                ci_lower = []
-                ci_upper = []
-                p_values = []
+                # Find column names (lifelines uses different column names)
+                available_cols = summary.columns.tolist()
+                hr_col = None
+                lower_col = None
+                upper_col = None
+                p_col = None
                 
-                for var in cluster_vars[:5]:  # Limit to 5 for readability
-                    if var in summary.index:
-                        variables.append(var.replace('cluster_', 'C').replace('_', ' '))
-                        hr_values.append(summary.loc[var, 'exp(coef)'])
-                        ci_lower.append(summary.loc[var, 'lower 0.95'])
-                        ci_upper.append(summary.loc[var, 'upper 0.95'])
-                        p_values.append(summary.loc[var, 'p'])
+                for col in available_cols:
+                    col_lower = str(col).lower()
+                    if 'exp(coef)' in col_lower or 'hazard' in col_lower:
+                        hr_col = col
+                    if 'lower' in col_lower and '95' in str(col):
+                        lower_col = col
+                    if 'upper' in col_lower and '95' in str(col):
+                        upper_col = col
+                    if col_lower == 'p' or 'p-value' in col_lower:
+                        p_col = col
+                
+                if hr_col and lower_col and upper_col and p_col:
+                    variables = []
+                    hr_values = []
+                    ci_lower = []
+                    ci_upper = []
+                    p_values = []
+                    
+                    for var in cluster_vars[:5]:  # Limit to 5 for readability
+                        if var in summary.index:
+                            variables.append(var.replace('cluster_', 'C').replace('_', ' '))
+                            hr_values.append(summary.loc[var, hr_col])
+                            ci_lower.append(summary.loc[var, lower_col])
+                            ci_upper.append(summary.loc[var, upper_col])
+                            p_values.append(summary.loc[var, p_col])
                 
                 if variables:
                     y_pos = np.arange(len(variables))
@@ -447,6 +472,14 @@ def create_survival_summary_figure(df, logrank_df, cph, cluster_col="cluster",
                     ax2.set_xlabel('Hazard Ratio', fontsize=10)
                     ax2.set_title('Hazard Ratios (Cox Model)', fontsize=11, fontweight='bold')
                     ax2.grid(True, alpha=0.3, axis='x')
+                else:
+                    ax2.text(0.5, 0.5, 'Cox model\ncolumns not found', ha='center', va='center', fontsize=11)
+                    ax2.set_xticks([])
+                    ax2.set_yticks([])
+            else:
+                ax2.text(0.5, 0.5, 'Cox model\nno cluster vars', ha='center', va='center', fontsize=11)
+                ax2.set_xticks([])
+                ax2.set_yticks([])
         except:
             ax2.text(0.5, 0.5, 'Cox model\nnot available', ha='center', va='center', fontsize=11)
             ax2.set_xticks([])
@@ -750,7 +783,7 @@ def run_logrank(df, cluster_col="cluster", time_col="OS_time",
     # Apply FDR correction if requested
     if apply_fdr_correction and len(results_df) > 0:
         try:
-            from statsmodels.stats.multitest import multipletests
+            from statsmodels.stats.multitest import multipletests  # type: ignore
             _, p_adj, _, _ = multipletests(results_df['p_value'], method='fdr_bh')
             results_df['p_value_adj'] = p_adj
             print(f"[Info] Applied Benjamini-Hochberg FDR correction to log-rank tests")

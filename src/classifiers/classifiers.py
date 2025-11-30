@@ -105,14 +105,20 @@ def train_mlp_classifier(X_train, y_train, X_valid, y_valid, X_test, y_test, **p
         for label, count in zip(unique_orig, counts_orig):
             print(f"  Class {label}: {count} samples ({count/len(y_train)*100:.1f}%)")
         
-        # Augment training data
-        X_train_aug, y_train_aug = augment_data(X_train, y_train, noise_std=noise_std)
+        # Augment training data (SMOTE-based, noise_std parameter ignored for backward compatibility)
+        X_train_aug, y_train_aug, validation_results = augment_data(X_train, y_train, noise_std=noise_std)
         
         # Show augmented distribution
         unique_aug, counts_aug = np.unique(y_train_aug, return_counts=True)
         print("\nAugmented class distribution:")
         for label, count in zip(unique_aug, counts_aug):
             print(f"  Class {label}: {count} samples ({count/len(y_train_aug)*100:.1f}%)")
+        
+        # Show distribution validation if available
+        if validation_results and 'pass_rate' in validation_results:
+            print(f"\nDistribution validation: Pass rate = {validation_results['pass_rate']:.2%}")
+            if not validation_results.get('passed', False):
+                print("  [WARNING] Distribution validation failed - augmentation may distort data")
         
         # Use augmented data for training
         X_train_final = X_train_aug
@@ -464,8 +470,8 @@ def validate_clustering_with_classifiers(processed_dir='data/processed',
             print("\n[Augmenting training data for SVM...]")
             from src.analysis.augmentation_ablation import augment_data
             
-            # Augment training data for SVM
-            X_train_svm, y_train_svm = augment_data(X_train, y_train, noise_std=noise_std)
+            # Augment training data for SVM (SMOTE-based, noise_std parameter ignored for backward compatibility)
+            X_train_svm, y_train_svm, validation_results = augment_data(X_train, y_train, noise_std=noise_std)
         else:
             X_train_svm = X_train
             y_train_svm = y_train

@@ -29,13 +29,14 @@ preprocessing:
   # These ensure fully connected graphs (required for BIGCLAM) with optimal density
   similarity_thresholds:
     tcga_brca_data: 0.1  # TCGA-BRCA: Optimal from grid search (similarity=0.1)
-    gse96058_data: 0.5  # GSE96058: Optimal from grid search (similarity=0.5)
+    gse96058_data: 0.4  # GSE96058: Optimal from grid search (similarity=0.4)
     # Default fallback if dataset not specified
     default: 0.4
   
 # BIGCLAM parameters
 bigclam:
   max_communities: 10  # Maximum communities to search (model finds optimal using AIC/BIC)
+  min_communities: 3  # Minimum communities to search (allows discovery of major molecular programs: Luminal, Basal, HER2)
   iterations: 100  # Optimization iterations per community number
   learning_rate: 0.08  # Adam optimizer learning rate
   
@@ -48,8 +49,10 @@ bigclam:
     default: "BIC"  # Fallback if dataset not specified
   
   # Note: Optimal number of communities is automatically determined using AIC/BIC
-  # The model tests 1 to max_communities and selects the best
+  # The model tests min_communities to max_communities and selects the best
   # BIC uses stronger penalty (log(N) × parameters) than AIC (2 × parameters)
+  # min_communities=3 allows discovery of major molecular programs (Luminal, Basal, HER2)
+  # The model will find the optimal number based on data-driven model selection
   
   # Optimization improvements
   adaptive_lr: true  # Adapt learning rate based on graph size (lower for larger graphs)
@@ -63,8 +66,10 @@ bigclam:
   dataset_specific:
     tcga_brca_data:
       num_restarts: 5  # TCGA-BRCA: 5 restarts (same as grid search)
+      min_communities: 3  # Allow discovery of major molecular programs (model will find optimal via BIC)
     gse96058_data:
       num_restarts: 5  # GSE96058: 5 restarts (same as grid search)
+      min_communities: 3  # Allow discovery of major molecular programs (model will find optimal via AIC)
   
 # Classifier parameters - Dataset-specific configurations for fine-tuning
 classifiers:
@@ -104,7 +109,7 @@ classifiers:
         hidden_layers: [128, 64, 32, 16]  # Best from tuning (increased capacity)
         use_augmentation: true  # Enable data augmentation to balance classes
         use_class_weights: true  # Enable class weights for imbalanced classes
-        augmentation_noise_std: 0.1  # Standard deviation for Gaussian noise augmentation
+        augmentation_noise_std: 0.1  # DEPRECATED: Kept for backward compatibility, SMOTE is now used (ignored)
         lr_scheduler_factor: 0.8  # Reduce LR by this factor when plateau (0.8 = 20% reduction)
         lr_scheduler_patience: 20  # Wait this many epochs before reducing LR
         lr_scheduler_min_lr: 0.001  # Minimum learning rate (same as initial LR to prevent getting stuck)
@@ -130,7 +135,7 @@ classifiers:
         hidden_layers: [512, 256, 128, 64]  # Best from tuning (reduced from 6 to 4 layers)
         use_augmentation: true  # Enable data augmentation to balance classes
         use_class_weights: true  # Enable class weights for imbalanced classes
-        augmentation_noise_std: 0.1  # Standard deviation for Gaussian noise augmentation
+        augmentation_noise_std: 0.1  # DEPRECATED: Kept for backward compatibility, SMOTE is now used (ignored)
         lr_scheduler_factor: 0.8  # Reduce LR by this factor when plateau (0.8 = 20% reduction)
         lr_scheduler_patience: 20  # Wait this many epochs before reducing LR
         lr_scheduler_min_lr: 0.001  # Minimum learning rate (same as initial LR to prevent getting stuck)
@@ -154,6 +159,10 @@ data_splitting:
   
 # Augmentation parameters
 augmentation:
+  method: "smote"  # SMOTE (Synthetic Minority Oversampling Technique)
+  k_neighbors: 5  # Number of nearest neighbors for SMOTE
+  random_state: 42  # Random seed for reproducibility
+  # Note: noise_mean and noise_std are deprecated (kept for backward compatibility)
   noise_mean: 0.0
   noise_std: 0.1
   

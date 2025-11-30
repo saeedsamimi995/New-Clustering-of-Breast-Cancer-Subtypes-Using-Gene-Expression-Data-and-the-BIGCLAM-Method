@@ -61,7 +61,7 @@ class MLP(nn.Module):
         for i in range(len(self.fc_layers)):
             x = self.fc_layers[i](x)
             x = self.bn_layers[i](x)
-        x = self.leakyrelu(x)
+            x = self.leakyrelu(x)
             x = self.dropout_layers[i](x)
         
         # Output layer
@@ -175,7 +175,7 @@ def train_and_evaluate(X_train, y_train_onehot, X_valid, y_valid_onehot, X_test,
         print(f"    Class weights: {dict(zip(range(num_classes), class_weights.round(3)))}")
         criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
     else:
-    criterion = nn.CrossEntropyLoss()
+        criterion = nn.CrossEntropyLoss()
     
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     

@@ -13,7 +13,7 @@ from .parameter_grid_search import (
     clear_memory
 )
 from .comprehensive_method_comparison import (
-    comprehensive_method_comparison
+    compare_all_methods
 )
 from .results_synthesis import (
     create_summary_table,
@@ -30,7 +30,7 @@ __all__ = [
     'run_single_combination',
     'create_grid_search_visualizations',
     'clear_memory',
-    'comprehensive_method_comparison',
+    'compare_all_methods',
     'create_summary_table',
     'generate_narrative',
     'create_manuscript_results_section'
