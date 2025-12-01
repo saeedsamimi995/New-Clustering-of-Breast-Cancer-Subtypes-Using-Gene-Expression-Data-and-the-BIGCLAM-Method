@@ -252,13 +252,14 @@ def cluster_all_graphs(input_dir='data/graphs', output_dir='data/clusterings',
         else:
             adjacency = np.load(graph_file)
         
-        # Get min_communities from dataset config or use default
+        # Get min/max communities from dataset config or use defaults
         dataset_min_communities = dataset_config.get('min_communities', min_communities)
+        dataset_max_communities = dataset_config.get('max_communities', max_communities)
         
         # Cluster
         communities, membership, optimal_k, runtime_info = cluster_data(
             adjacency,
-            max_communities=max_communities,
+            max_communities=dataset_max_communities,
             min_communities=dataset_min_communities,
             iterations=dataset_iterations,
             lr=dataset_lr,

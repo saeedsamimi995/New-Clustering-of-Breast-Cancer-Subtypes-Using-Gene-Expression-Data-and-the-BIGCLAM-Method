@@ -49,6 +49,9 @@ def create_sample_matching_qc(dataset_name='gse96058',
     expr_samples = list(expr_df.columns)
     print(f"  ✓ Loaded {len(expr_samples)} expression samples")
     
+    # Keep only numeric expression values (ignore annotation rows like PAM50 strings)
+    expr_df = expr_df.apply(pd.to_numeric, errors='coerce')
+    
     # Load clinical data
     print(f"\n[Loading] Clinical data from {clinical_file}...")
     clinical_df = pd.read_csv(clinical_file, index_col=0)
@@ -57,7 +60,7 @@ def create_sample_matching_qc(dataset_name='gse96058',
     
     # Calculate variance for top 100 most variable genes
     print(f"\n[Calculating] Gene variance for signature generation...")
-    gene_variance = expr_df.var(axis=1)
+    gene_variance = expr_df.var(axis=1, numeric_only=True)
     top_100_genes = gene_variance.nlargest(100).index.tolist()
     print(f"  ✓ Selected top 100 most variable genes")
     

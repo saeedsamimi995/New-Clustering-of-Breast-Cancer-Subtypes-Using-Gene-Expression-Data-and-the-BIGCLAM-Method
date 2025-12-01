@@ -60,7 +60,11 @@ def load_data_for_stability(dataset_name, processed_dir='data/processed',
         csv_file = Path(processed_dir).parent / f'{prefix}_target_added.csv'
         if csv_file.exists():
             df = pd.read_csv(csv_file, index_col=0)
-            X = df.values.T  # Samples x Genes
+            # Coerce to numeric to drop annotation strings (e.g., PAM50 labels)
+            df_numeric = df.apply(pd.to_numeric, errors='coerce')
+            # Fill any remaining NaNs with column means to allow scaling
+            df_numeric = df_numeric.fillna(df_numeric.mean())
+            X = df_numeric.values.T  # Samples x Genes
         else:
             print(f"[Warning] Could not load expression data for silhouette calculation")
             X = None

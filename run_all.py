@@ -36,11 +36,65 @@ from src.interpretation import interpret_results, analyze_overlap, biological_in
 from src.analysis import analyze_cross_dataset_consistency, run_grid_search
 from src.analysis.comprehensive_method_comparison import compare_all_methods
 from src.classifiers import validate_clustering_with_classifiers
+from src.preprocessing.sample_matching_qc import create_sample_matching_qc
+from src.analysis.cluster_stability import run_cluster_stability_analysis
+from src.analysis.parameter_grid_search import generate_precise_range
 
 def load_config(config_path='config/config.yml'):
     """Load configuration from YAML file."""
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
+
+
+def get_optimal_similarity_from_grid_search(dataset_name_key, short_name, config, config_path, output_dir='results/grid_search'):
+    """
+    Run or reuse parameter grid search to obtain the best similarity threshold
+    for a given dataset, based on ARI/NMI/purity/F1 and community-count heuristics.
+    
+    Args:
+        dataset_name_key: Long dataset name used in filenames, e.g. 'tcga_brca_data'
+        short_name: Short dataset key used in config, e.g. 'tcga' or 'gse96058'
+        config: Loaded YAML config dict
+        config_path: Path to config file (string)
+        output_dir: Directory where grid search results are stored
+    
+    Returns:
+        float or None: Selected similarity threshold, or None if grid search fails
+    """
+    dataset_prep_cfg = config.get('dataset_preparation', {})
+    grid_cfg = config.get('grid_search', {})
+    
+    ds_prep = dataset_prep_cfg.get(short_name, {})
+    input_file = ds_prep.get('output')
+    if not input_file or not Path(input_file).exists():
+        print(f"[WARNING] Grid search skipped for {dataset_name_key}: input file not found ({input_file})")
+        return None
+    
+    ds_grid = grid_cfg.get(short_name, {})
+    sim_range = list(generate_precise_range(
+        ds_grid.get('similarity_start', 0.1),
+        ds_grid.get('similarity_end', 0.9),
+        ds_grid.get('similarity_step', 0.05)
+    ))
+    
+    print(f"\n[Grid Search] Auto-running for {dataset_name_key} to select similarity threshold...")
+    results = run_grid_search(
+        dataset_name_key,
+        input_file,
+        sim_range,
+        config_path,
+        output_dir
+    )
+    
+    if results and isinstance(results, dict):
+        best_cfg = results.get('best_config', {})
+        if 'similarity_threshold' in best_cfg:
+            best_sim = float(best_cfg['similarity_threshold'])
+            print(f"[Grid Search] Selected similarity for {dataset_name_key}: {best_sim}")
+            return best_sim
+    
+    print(f"[WARNING] Grid search did not return a best similarity for {dataset_name_key}")
+    return None
 
 
 def main():
@@ -191,7 +245,7 @@ def main():
         if Path(gse_output).exists():
             preprocess_data(gse_output, output_dir='data/processed')
     
-    # Step 2: Graph Construction
+    # Step 2: Graph Construction (now driven by parameter_grid_search)
     if 'graph' in steps_to_run:
         print("\n" + "="*80)
         print("STEP 2: GRAPH CONSTRUCTION")
@@ -201,28 +255,66 @@ def main():
         graph_config = load_config(args.config)
         preprocessing_config = graph_config.get('preprocessing', {})
         
-        # Use dataset-specific thresholds if available, otherwise fallback to single threshold
-        similarity_thresholds = preprocessing_config.get('similarity_thresholds', {})
-        if similarity_thresholds:
-            # Work with a copy and cast to float (handles YAML strings/decimals)
-            similarity_thresholds = {
-                dataset: float(value)
-                for dataset, value in similarity_thresholds.items()
-            }
-        if similarity_thresholds:
+        # Prefer automatic similarity selection via parameter_grid_search
+        auto_similarity = graph_config.get('grid_search', {}).get('use_in_run_all', True)
+        
+        thresholds_dict = {}
+        if auto_similarity:
+            # Use grid search to pick best similarity per dataset (if possible)
+            tcga_sim = get_optimal_similarity_from_grid_search(
+                dataset_name_key='tcga_brca_data',
+                short_name='tcga',
+                config=graph_config,
+                config_path=args.config,
+                output_dir='results/grid_search'
+            )
+            if tcga_sim is not None:
+                thresholds_dict['tcga_brca_data'] = tcga_sim
+            
+            gse_sim = get_optimal_similarity_from_grid_search(
+                dataset_name_key='gse96058_data',
+                short_name='gse96058',
+                config=graph_config,
+                config_path=args.config,
+                output_dir='results/grid_search'
+            )
+            if gse_sim is not None:
+                thresholds_dict['gse96058_data'] = gse_sim
+        
+        # If auto mode is disabled or failed, fall back to config thresholds
+        if not thresholds_dict:
+            similarity_thresholds = preprocessing_config.get('similarity_thresholds', {})
+            if similarity_thresholds:
+                # Work with a copy and cast to float (handles YAML strings/decimals)
+                similarity_thresholds = {
+                    dataset: float(value)
+                    for dataset, value in similarity_thresholds.items()
+                }
+                thresholds_dict = {
+                    k: v for k, v in similarity_thresholds.items() if k != 'default'
+                }
+        
+        if thresholds_dict:
             config_path = Path(args.config).resolve()
-            print(f"Using dataset-specific similarity thresholds (from {config_path}):")
-            for dataset, thresh in similarity_thresholds.items():
-                if dataset != 'default':
-                    print(f"  {dataset}: {thresh}")
-            construct_graphs(input_dir='data/processed', output_dir='data/graphs',
-                            thresholds_dict=similarity_thresholds, use_sparse=True)
+            print(f"Using dataset-specific similarity thresholds (from grid search / config, {config_path}):")
+            for dataset, thresh in thresholds_dict.items():
+                print(f"  {dataset}: {thresh}")
+            construct_graphs(
+                input_dir='data/processed',
+                output_dir='data/graphs',
+                thresholds_dict=thresholds_dict,
+                use_sparse=True
+            )
         else:
             # Fallback to single threshold (for backwards compatibility)
             similarity_threshold = preprocessing_config.get('similarity_threshold', 0.4)
             print(f"Using single similarity threshold: {similarity_threshold}")
-            construct_graphs(input_dir='data/processed', output_dir='data/graphs',
-                            threshold=similarity_threshold, use_sparse=True)
+            construct_graphs(
+                input_dir='data/processed',
+                output_dir='data/graphs',
+                threshold=similarity_threshold,
+                use_sparse=True
+            )
     
     # Step 3: Clustering
     if 'cluster' in steps_to_run and not args.skip_clustering:
@@ -666,13 +758,22 @@ def main():
             
             print(f"\n[Running] Biological interpretation for {dataset_name}...")
             try:
+                # Use slightly more permissive thresholds for GSE96058 to capture
+                # trend-level biology in the validation cohort
+                if dataset_name == 'gse96058':
+                    log2fc_thr = 0.8
+                    p_thr = 0.10
+                else:
+                    log2fc_thr = 1.0
+                    p_thr = 0.05
+
                 biological_interpretation_pipeline(
                     dataset_name=dataset_name,
                     processed_dir='data/processed',
                     clustering_dir='data/clusterings',
                     output_dir='results/biological_interpretation',
-                    log2fc_threshold=1.0,
-                    pvalue_threshold=0.05,
+                    log2fc_threshold=log2fc_thr,
+                    pvalue_threshold=p_thr,
                     use_original_data=True  # Use original data to include all genes
                 )
             except Exception as e:

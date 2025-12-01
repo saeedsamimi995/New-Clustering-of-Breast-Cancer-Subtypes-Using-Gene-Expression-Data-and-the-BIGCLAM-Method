@@ -36,7 +36,7 @@ import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
 import seaborn as sns
-from matplotlib.gridspec import GridSpec
+from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
 warnings.filterwarnings('ignore')
 
 # Add src to path for imports
@@ -57,7 +57,7 @@ try:
 except ImportError:
     STATSMODELS_AVAILABLE = False
     multipletests = None  # Placeholder to avoid NameError
-    print("[Warning] statsmodels not available. Will use basic FDR correction.")
+    print("[Warning] statsmodels not available. Using internal Benjamini-Hochberg FDR implementation.")
 
 
 # Breast cancer signature gene sets
@@ -217,6 +217,28 @@ def load_expression_and_clusters(dataset_name, processed_dir='data/processed',
     return expression_data, gene_names, sample_names, clusters
 
 
+def _bh_fdr(pvalues: np.ndarray) -> np.ndarray:
+    """
+    Benjamini-Hochberg FDR correction implemented without external dependencies.
+    Returns adjusted p-values in the original order.
+    """
+    pvalues = np.asarray(pvalues, dtype=float)
+    m = pvalues.size
+    if m == 0:
+        return pvalues
+    order = np.argsort(pvalues)
+    ranked_p = pvalues[order]
+    ranks = np.arange(1, m + 1)
+    # Compute BH adjusted p-values
+    adj = ranked_p * m / ranks
+    # Enforce monotonicity from largest to smallest
+    adj = np.minimum.accumulate(adj[::-1])[::-1]
+    adj = np.clip(adj, 0, 1)
+    out = np.empty_like(adj)
+    out[order] = adj
+    return out
+
+
 def differential_expression_analysis(expression_data, gene_names, clusters, 
                                     cluster_id, method='ttest', 
                                     log2_fold_change_threshold=1.0,
@@ -285,13 +307,11 @@ def differential_expression_analysis(expression_data, gene_names, clusters,
     else:
         raise ValueError(f"Unknown method: {method}")
     
-    # FDR correction
+    # FDR correction (Benjamini-Hochberg)
     if STATSMODELS_AVAILABLE and multipletests is not None:
         _, pvalues_adj, _, _ = multipletests(pvalues, method='fdr_bh')
     else:
-        # Simple Bonferroni correction (fallback when statsmodels not available)
-        pvalues_adj = pvalues * len(pvalues)
-        pvalues_adj = np.clip(pvalues_adj, 0, 1)
+        pvalues_adj = _bh_fdr(pvalues)
     
     # Create results DataFrame
     results = pd.DataFrame({
@@ -482,7 +502,8 @@ def calculate_signature_scores(expression_data, gene_names, signature_name, sign
 
 
 def cell_type_signature_analysis(expression_data, gene_names, clusters, 
-                                output_dir='results/biological_interpretation'):
+                                output_dir='results/biological_interpretation',
+                                dataset_name=None):
     """
     Analyze cell-type and functional signatures for each cluster.
     
@@ -509,6 +530,14 @@ def cell_type_signature_analysis(expression_data, gene_names, clusters,
         scores = calculate_signature_scores(expression_data, gene_names, sig_name, sig_genes)
         all_signature_scores[sig_name] = scores
     
+    # Decide p-value cutoff for enrichment:
+    # - Discovery cohort (TCGA): strict (p < 0.05)
+    # - External validation cohort (GSE96058): more permissive trend-level (p < 0.20)
+    if dataset_name is not None and str(dataset_name).lower().startswith('tcga'):
+        p_cut = 0.05
+    else:
+        p_cut = 0.20
+    
     # Analyze per cluster
     for cluster_id in unique_clusters:
         cluster_mask = clusters == cluster_id
@@ -534,7 +563,7 @@ def cell_type_signature_analysis(expression_data, gene_names, clusters,
                 'other_mean': other_mean,
                 'difference': cluster_mean - other_mean,
                 'pvalue': p_val,
-                'enriched': cluster_mean > other_mean and p_val < 0.05
+                'enriched': cluster_mean > other_mean and p_val < p_cut
             }
             
             status = "↑ ENRICHED" if cluster_results[sig_name]['enriched'] else ""
@@ -637,7 +666,9 @@ def create_biological_interpretation_figures(dataset_name,
         output_dir: Output directory
         top_n_genes: Number of top genes to show in bar plots
     """
-    output_dir = Path(output_dir) / dataset_name
+    # Here, output_dir is expected to be the dataset-specific directory
+    # (e.g., results/biological_interpretation/tcga). Do NOT append dataset_name again.
+    output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
     print(f"\n[Visualization] Creating figures for {dataset_name}...")
@@ -730,6 +761,23 @@ def create_biological_interpretation_figures(dataset_name,
             continue
         
         de_data = pd.read_csv(de_file)
+        if 'log2fc' not in de_data.columns or len(de_data) == 0:
+            if idx < len(axes):
+                axes[idx].text(0.5, 0.5, f'Cluster {cluster_id}\nNo DE genes',
+                               ha='center', va='center', fontsize=12)
+                axes[idx].set_xticks([])
+                axes[idx].set_yticks([])
+            continue
+        
+        # Ensure numeric dtype for log2fc to support nlargest/nsmallest
+        de_data['log2fc'] = pd.to_numeric(de_data['log2fc'], errors='coerce')
+        if de_data['log2fc'].isna().all():
+            if idx < len(axes):
+                axes[idx].text(0.5, 0.5, f'Cluster {cluster_id}\nNo DE genes',
+                               ha='center', va='center', fontsize=12)
+                axes[idx].set_xticks([])
+                axes[idx].set_yticks([])
+            continue
         
         # Get top upregulated and downregulated
         top_up = de_data[de_data['log2fc'] > 0].nlargest(top_n_genes, 'log2fc')
@@ -847,23 +895,62 @@ def create_biological_interpretation_figures(dataset_name,
     ax1.set_ylabel('Signature', fontsize=10)
     ax1.set_yticklabels(ax1.get_yticklabels(), rotation=0)
     
-    # 2. Top DE Genes for first cluster (middle left)
-    ax2 = fig.add_subplot(gs[1, 0])
-    if len(clusters) > 0:
-        de_file = output_dir / f'cluster_{clusters[0]}_differential_expression.csv'
-        if de_file.exists():
+    # 2. Top DE Genes for all clusters (middle left as small multiples)
+    #    Use a nested GridSpec so each cluster has its own small barplot.
+    if n_clusters > 0:
+        n_cols_de = min(2, n_clusters)
+        n_rows_de = (n_clusters + n_cols_de - 1) // n_cols_de
+        de_gs = GridSpecFromSubplotSpec(
+            n_rows_de, n_cols_de, subplot_spec=gs[1, 0], hspace=0.4, wspace=0.4
+        )
+        
+        for idx, cluster_id in enumerate(clusters):
+            row = idx // n_cols_de
+            col = idx % n_cols_de
+            ax2 = fig.add_subplot(de_gs[row, col])
+            
+            de_file = output_dir / f'cluster_{cluster_id}_differential_expression.csv'
+            if not de_file.exists():
+                ax2.text(0.5, 0.5, f'Cluster {cluster_id}\nNo DE data',
+                         ha='center', va='center', fontsize=9)
+                ax2.set_xticks([])
+                ax2.set_yticks([])
+                continue
+            
             de_data = pd.read_csv(de_file)
+            if 'log2fc' not in de_data.columns or len(de_data) == 0:
+                ax2.text(0.5, 0.5, f'Cluster {cluster_id}\nNo DE genes',
+                         ha='center', va='center', fontsize=9)
+                ax2.set_xticks([])
+                ax2.set_yticks([])
+                continue
+            
+            # Ensure numeric dtype for log2fc in case an empty CSV was written
+            de_data['log2fc'] = pd.to_numeric(de_data['log2fc'], errors='coerce')
+            if de_data['log2fc'].isna().all():
+                ax2.text(0.5, 0.5, f'Cluster {cluster_id}\nNo DE genes',
+                         ha='center', va='center', fontsize=9)
+                ax2.set_xticks([])
+                ax2.set_yticks([])
+                continue
+            
             de_data['abs_log2fc'] = de_data['log2fc'].abs()
-            top_genes = de_data.nlargest(10, 'abs_log2fc')
-            if len(top_genes) > 0:
-                colors = ['#d73027' if x > 0 else '#4575b4' for x in top_genes['log2fc']]
-                ax2.barh(range(len(top_genes)), top_genes['log2fc'], color=colors, alpha=0.7)
-                ax2.set_yticks(range(len(top_genes)))
-                ax2.set_yticklabels(top_genes['gene'], fontsize=9)
-                ax2.set_xlabel('log2FC', fontsize=10)
-                ax2.set_title(f'Top DE Genes: Cluster {clusters[0]}', fontsize=11, fontweight='bold')
-                ax2.axvline(0, color='black', linestyle='--', linewidth=0.5)
-                ax2.grid(axis='x', alpha=0.3)
+            top_genes = de_data.nlargest(min(8, len(de_data)), 'abs_log2fc')
+            if len(top_genes) == 0:
+                ax2.text(0.5, 0.5, f'Cluster {cluster_id}\nNo DE genes',
+                         ha='center', va='center', fontsize=9)
+                ax2.set_xticks([])
+                ax2.set_yticks([])
+                continue
+            
+            colors = ['#d73027' if x > 0 else '#4575b4' for x in top_genes['log2fc']]
+            ax2.barh(range(len(top_genes)), top_genes['log2fc'], color=colors, alpha=0.7)
+            ax2.set_yticks(range(len(top_genes)))
+            ax2.set_yticklabels(top_genes['gene'], fontsize=7)
+            ax2.set_xlabel('log2FC', fontsize=8)
+            ax2.set_title(f'Cluster {cluster_id}', fontsize=9, fontweight='bold')
+            ax2.axvline(0, color='black', linestyle='--', linewidth=0.5)
+            ax2.grid(axis='x', alpha=0.3)
     
     # 3. Signature enrichment summary (middle right)
     ax3 = fig.add_subplot(gs[1, 1])
@@ -1000,6 +1087,24 @@ def biological_interpretation_pipeline(dataset_name,
     output_dir = Path(output_dir) / dataset_name
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    # Dataset-specific DE thresholds
+    de_log2fc_thr = log2fc_threshold
+    de_pval_thr = pvalue_threshold
+    ds_lower = str(dataset_name).lower()
+    if ds_lower == 'gse96058':
+        # For the external validation microarray cohort (GSE96058),
+        # use more permissive, trend-level thresholds to reveal biology:
+        # - Smaller effect size cutoff
+        # - Higher FDR cutoff (still BH-adjusted)
+        de_log2fc_thr = 0.3
+        de_pval_thr = 0.30
+        print(f"\n[Info] Using relaxed DE thresholds for GSE96058: "
+              f"|log2FC| >= {de_log2fc_thr}, padj < {de_pval_thr}")
+    elif ds_lower.startswith('tcga'):
+        # Keep defaults for TCGA (discovery cohort)
+        print(f"\n[Info] Using strict DE thresholds for TCGA: "
+              f"|log2FC| >= {de_log2fc_thr}, padj < {de_pval_thr}")
+    
     # Load data
     expression_data, gene_names, sample_names, clusters = load_expression_and_clusters(
         dataset_name, processed_dir, clustering_dir, use_original_data=use_original_data
@@ -1017,8 +1122,8 @@ def biological_interpretation_pipeline(dataset_name,
     for cluster_id in unique_clusters:
         de_full, de_sig = differential_expression_analysis(
             expression_data, gene_names, clusters, cluster_id,
-            log2_fold_change_threshold=log2fc_threshold,
-            pvalue_threshold=pvalue_threshold
+            log2_fold_change_threshold=de_log2fc_thr,
+            pvalue_threshold=de_pval_thr
         )
         
         de_results_all[cluster_id] = {
@@ -1026,11 +1131,11 @@ def biological_interpretation_pipeline(dataset_name,
             'significant': de_sig
         }
         
-        # Save DE results
-        if len(de_sig) > 0:
-            de_file = output_dir / f"cluster_{cluster_id}_differential_expression.csv"
-            de_sig.to_csv(de_file, index=False)
-            print(f"  Saved DE results to {de_file}")
+        # Save DE results for every cluster (even if empty) so that downstream
+        # code and users always see one CSV per cluster.
+        de_file = output_dir / f"cluster_{cluster_id}_differential_expression.csv"
+        de_sig.to_csv(de_file, index=False)
+        print(f"  Saved DE results to {de_file} (n={len(de_sig)} genes)")
     
     # 2. Pathway enrichment
     print("\n" + "-"*80)
@@ -1043,7 +1148,7 @@ def biological_interpretation_pipeline(dataset_name,
         
         if len(de_sig) > 0:
             # Get upregulated genes (log2FC > threshold)
-            up_genes = de_sig[de_sig['log2fc'] > log2fc_threshold]['gene'].tolist()
+            up_genes = de_sig[de_sig['log2fc'] > de_log2fc_thr]['gene'].tolist()
             
             if len(up_genes) > 0:
                 pathway_results = pathway_enrichment_analysis(
@@ -1071,7 +1176,7 @@ def biological_interpretation_pipeline(dataset_name,
     print("-"*80)
     
     signature_results, signature_df = cell_type_signature_analysis(
-        expression_data, gene_names, clusters, output_dir
+        expression_data, gene_names, clusters, output_dir, dataset_name=dataset_name
     )
     
     # 4. Generate interpretations

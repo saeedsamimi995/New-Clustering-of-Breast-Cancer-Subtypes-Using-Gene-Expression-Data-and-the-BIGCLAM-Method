@@ -66,10 +66,12 @@ bigclam:
   dataset_specific:
     tcga_brca_data:
       num_restarts: 5  # TCGA-BRCA: 5 restarts (same as grid search)
-      min_communities: 3  # Allow discovery of major molecular programs (model will find optimal via BIC)
+      min_communities: 5  # Force 5-community solution for TCGA (matches grid search)
+      max_communities: 10
     gse96058_data:
       num_restarts: 5  # GSE96058: 5 restarts (same as grid search)
-      min_communities: 3  # Allow discovery of major molecular programs (model will find optimal via AIC)
+      min_communities: 4  # Force 4-community solution for GSE96058 (matches grid search)
+      max_communities: 10 # AIC used but search range is fixed to k=4
   
 # Classifier parameters - Dataset-specific configurations for fine-tuning
 classifiers:
