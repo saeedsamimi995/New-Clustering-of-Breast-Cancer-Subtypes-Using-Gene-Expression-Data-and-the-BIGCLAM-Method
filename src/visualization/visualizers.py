@@ -20,6 +20,21 @@ except ImportError:
     UMAP_AVAILABLE = False
     print("[Note] UMAP not available. Install with: pip install umap-learn")
 
+# Publication-style defaults for embedding / heatmap figures
+plt.rcParams.update({
+    "figure.dpi": 300,
+    "savefig.dpi": 300,
+    "font.size": 11,
+    "axes.titlesize": 13,
+    "axes.labelsize": 11,
+    "xtick.labelsize": 9,
+    "ytick.labelsize": 9,
+    "legend.fontsize": 9,
+    "axes.spines.top": False,
+    "axes.spines.right": False,
+})
+sns.set_theme(style="whitegrid", context="paper", palette="Set2")
+
 
 def create_tsne_plot(expression_data, communities, target_labels, dataset_name, 
                     output_dir='results/visualization', perplexity=30):

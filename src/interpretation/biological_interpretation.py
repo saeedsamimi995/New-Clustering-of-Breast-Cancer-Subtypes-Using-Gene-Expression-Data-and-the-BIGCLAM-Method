@@ -37,6 +37,23 @@ matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
+
+# ---------------------------------------------------------------------------
+# Global plotting style for publication-quality figures
+# ---------------------------------------------------------------------------
+plt.rcParams.update({
+    "figure.dpi": 300,
+    "savefig.dpi": 300,
+    "font.size": 11,
+    "axes.titlesize": 13,
+    "axes.labelsize": 11,
+    "xtick.labelsize": 9,
+    "ytick.labelsize": 9,
+    "legend.fontsize": 9,
+    "axes.spines.top": False,
+    "axes.spines.right": False,
+})
+sns.set_theme(style="whitegrid", context="paper", palette="Set2")
 warnings.filterwarnings('ignore')
 
 # Add src to path for imports
