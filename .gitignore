@@ -45,16 +45,20 @@ venv.bak/
 
 # Data files (add specific files if they shouldn't be tracked)
 data/
-#results/
 
 # Results and outputs
-results/
+# results/ - REMOVED: results should be tracked in git
+# figures/ - REMOVED: figures should be tracked in git
+
+# TIFF files (high-resolution figures - too large for git)
 *.tiff
 *.tif
-*.npy
-*.npz
-*.pkl
-*.csv
+
+# Large binary files in data/ directory only
+data/**/*.npy
+data/**/*.npz
+data/**/*.pkl
+data/**/*.csv
 
 # Logs
 *.log

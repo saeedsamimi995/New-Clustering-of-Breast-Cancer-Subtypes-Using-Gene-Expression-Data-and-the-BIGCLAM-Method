@@ -604,48 +604,43 @@ def create_comparison_figures(comparison_df, dataset_name, output_dir):
     plt.rcParams['savefig.dpi'] = 300
     
     # Filter out methods with NaN values for plotting
-    plot_df = comparison_df.dropna(subset=['Silhouette', 'NMI vs PAM50', 'ARI vs PAM50'])
-    
+    plot_df = comparison_df.dropna(subset=['NMI vs PAM50', 'ARI vs PAM50'])
+
     if len(plot_df) == 0:
         print("  [Warning] No valid data for plotting")
         return
-    
+
     # ===== FIGURE 1: Metrics Comparison Bar Plot =====
     print("  Creating metrics comparison bar plot...")
-    
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    
-    metrics = ['Silhouette', 'Davies-Bouldin', 'NMI vs PAM50', 'ARI vs PAM50']
-    metric_titles = ['Silhouette Score', 'Davies-Bouldin Index', 'NMI vs PAM50', 'ARI vs PAM50']
-    
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    metrics = ['NMI vs PAM50', 'ARI vs PAM50']
+    metric_titles = ['NMI vs PAM50', 'ARI vs PAM50']
+
     for idx, (metric, title) in enumerate(zip(metrics, metric_titles)):
-        ax = axes[idx // 2, idx % 2]
-        
-        # Sort by metric value (descending, except for Davies-Bouldin which is lower is better)
-        if metric == 'Davies-Bouldin':
-            plot_df_sorted = plot_df.sort_values(metric, ascending=True)
-            colors = plt.cm.RdYlGn_r(np.linspace(0.2, 0.8, len(plot_df_sorted)))
-        else:
-            plot_df_sorted = plot_df.sort_values(metric, ascending=False)
-            colors = plt.cm.viridis(np.linspace(0.2, 0.8, len(plot_df_sorted)))
-        
-        bars = ax.barh(range(len(plot_df_sorted)), plot_df_sorted[metric], color=colors, alpha=0.7)
+        ax = axes[idx]
+
+        plot_df_sorted = plot_df.sort_values(metric, ascending=False)
+        colors = plt.cm.viridis(np.linspace(0.2, 0.8, len(plot_df_sorted)))
+
+        bars = ax.barh(range(len(plot_df_sorted)), plot_df_sorted[metric], color=colors, alpha=0.8)
         ax.set_yticks(range(len(plot_df_sorted)))
         ax.set_yticklabels(plot_df_sorted['Method'], fontsize=9)
         ax.set_xlabel(metric, fontsize=10)
         ax.set_title(title, fontsize=11, fontweight='bold')
         ax.grid(axis='x', alpha=0.3)
-        
+
         # Highlight BIGCLAM
         if 'BIGCLAM' in plot_df_sorted['Method'].values:
             bigclam_idx = plot_df_sorted['Method'].tolist().index('BIGCLAM')
             bars[bigclam_idx].set_edgecolor('red')
             bars[bigclam_idx].set_linewidth(2)
-    
-    plt.suptitle(f'{dataset_name.upper()}: Clustering Method Comparison', 
-                fontsize=14, fontweight='bold', y=0.995)
+
+    plt.suptitle(f'{dataset_name.upper()}: Clustering Method Comparison',
+                 fontsize=14, fontweight='bold', y=0.98)
     plt.tight_layout()
-    
+
     fig_file = output_dir / f"{dataset_name}_method_comparison_metrics.png"
     plt.savefig(fig_file, bbox_inches='tight', facecolor='white')
     plt.close()

@@ -90,7 +90,7 @@ def prepare_survival_dataframe(cluster_assignments, clinical_df,
             print(f"    - Whether IDs need transformation (e.g., removing prefixes/suffixes)")
             raise ValueError(f"No matching sample IDs found. Cluster IDs: {list(cluster_ids)[:3]}, Clinical IDs: {list(clinical_ids)[:3]}")
     else:
-        df = clinical_df.merge(cluster_assignments, on=id_col, how="inner")
+    df = clinical_df.merge(cluster_assignments, on=id_col, how="inner")
         print(f"  After merge: {len(df)} samples")
 
     # Ensure correct dtypes
@@ -119,7 +119,7 @@ def plot_kaplan_meier(df, cluster_col="cluster", time_col="OS_time",
     output_dir.mkdir(parents=True, exist_ok=True)
 
     km = KaplanMeierFitter()
-    
+
     # Set style
     sns.set_style("whitegrid")
     plt.rcParams['figure.dpi'] = 300
@@ -864,15 +864,15 @@ def run_cox(df,
         raise ValueError(f"Insufficient events ({n_events}) for Cox model (need at least 5)")
 
     try:
-        cph = CoxPHFitter()
-        cph.fit(cox_df, duration_col=duration_col, event_col=event_col)
+    cph = CoxPHFitter()
+    cph.fit(cox_df, duration_col=duration_col, event_col=event_col)
         
         if used_adjust_cols:
             print(f"[Info] Cox model fitted with adjustment variables: {used_adjust_cols}")
         else:
             print(f"[Info] Cox model fitted without adjustment variables (unadjusted)")
         
-        return cph
+    return cph
     except Exception as e:
         # If adjusted model fails, try unadjusted model
         if used_adjust_cols:
@@ -951,7 +951,7 @@ def survival_evaluation(cluster_assignments,
         dataset_name=dataset_name
     )
     print(median_survival_df)
-    
+
     # Logrank test
     log_df = run_logrank(df, cluster_col=cluster_col, apply_fdr_correction=True)
     print("\nLog-rank pairwise results (with FDR correction):")
@@ -997,13 +997,13 @@ def survival_evaluation(cluster_assignments,
         cph = run_cox(df, cluster_col=cluster_col, adjust_cols=final_adjust_cols,
                      output_dir=dataset_output_dir, dataset_name=dataset_name)
         if cph is not None:
-            print("\nCox Model Summary:")
-            print(cph.summary)
+    print("\nCox Model Summary:")
+    print(cph.summary)
 
-            # Save hazard table
+    # Save hazard table
             summary_path = dataset_output_dir / "cox_summary.csv"
-            cph.summary.to_csv(summary_path)
-            print(f"[Saved] Cox model → {summary_path}")
+    cph.summary.to_csv(summary_path)
+    print(f"[Saved] Cox model → {summary_path}")
             
             # Test proportional hazards assumption
             print(f"\n[Testing] Proportional hazards assumption...")
