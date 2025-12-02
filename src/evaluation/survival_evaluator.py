@@ -864,15 +864,15 @@ def run_cox(df,
         raise ValueError(f"Insufficient events ({n_events}) for Cox model (need at least 5)")
 
     try:
-    cph = CoxPHFitter()
-    cph.fit(cox_df, duration_col=duration_col, event_col=event_col)
+        cph = CoxPHFitter()
+        cph.fit(cox_df, duration_col=duration_col, event_col=event_col)
         
         if used_adjust_cols:
             print(f"[Info] Cox model fitted with adjustment variables: {used_adjust_cols}")
         else:
             print(f"[Info] Cox model fitted without adjustment variables (unadjusted)")
         
-    return cph
+        return cph
     except Exception as e:
         # If adjusted model fails, try unadjusted model
         if used_adjust_cols:
