@@ -997,13 +997,13 @@ def survival_evaluation(cluster_assignments,
         cph = run_cox(df, cluster_col=cluster_col, adjust_cols=final_adjust_cols,
                      output_dir=dataset_output_dir, dataset_name=dataset_name)
         if cph is not None:
-    print("\nCox Model Summary:")
-    print(cph.summary)
+            print("\nCox Model Summary:")
+            print(cph.summary)
 
-    # Save hazard table
+            # Save hazard table
             summary_path = dataset_output_dir / "cox_summary.csv"
-    cph.summary.to_csv(summary_path)
-    print(f"[Saved] Cox model → {summary_path}")
+            cph.summary.to_csv(summary_path)
+            print(f"[Saved] Cox model → {summary_path}")
             
             # Test proportional hazards assumption
             print(f"\n[Testing] Proportional hazards assumption...")
