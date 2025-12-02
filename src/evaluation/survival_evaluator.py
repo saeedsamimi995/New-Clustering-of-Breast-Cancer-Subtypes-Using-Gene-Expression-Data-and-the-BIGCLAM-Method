@@ -90,7 +90,7 @@ def prepare_survival_dataframe(cluster_assignments, clinical_df,
             print(f"    - Whether IDs need transformation (e.g., removing prefixes/suffixes)")
             raise ValueError(f"No matching sample IDs found. Cluster IDs: {list(cluster_ids)[:3]}, Clinical IDs: {list(clinical_ids)[:3]}")
     else:
-    df = clinical_df.merge(cluster_assignments, on=id_col, how="inner")
+        df = clinical_df.merge(cluster_assignments, on=id_col, how="inner")
         print(f"  After merge: {len(df)} samples")
 
     # Ensure correct dtypes
