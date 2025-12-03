@@ -1,0 +1,13 @@
+Sample Matching QC Summary: GSE96058
+================================================================================
+
+Dataset: gse96058
+Expression samples: 3409
+Clinical samples: 3409
+Matched samples: 3409
+Unmatched expression: 0
+Unmatched clinical: 0
+Matching rate: 100.00%
+Matching method: positional
+Validation method: hash_signature
+Validation status: passed

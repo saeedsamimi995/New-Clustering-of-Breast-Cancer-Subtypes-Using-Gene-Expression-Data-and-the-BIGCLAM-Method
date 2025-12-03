@@ -1,0 +1,29 @@
+================================================================================
+BIOLOGICAL INTERPRETATION SUMMARY: GSE96058
+================================================================================
+
+
+Cluster 0:
+Highly expressed: DQ584545, TRNA_Pseudo, DQ598345, SNORD60, DQ576791
+Enriched pathways: MicroRNAs in cancer
+Signatures: luminal_hormonal, proliferation
+--------------------------------------------------------------------------------
+
+Cluster 1:
+Highly expressed: DM110804, M26316, HM467897, DQ576862, JA611306
+--------------------------------------------------------------------------------
+
+Cluster 2:
+Highly expressed: DQ598167, DQ582231, DQ576856, MIR6869, MIR6819
+--------------------------------------------------------------------------------
+
+Cluster 3:
+Highly expressed: septin 9/TNRC6C fusion, D64149, MIR4459, M37726, DQ598167
+Signatures: immune_infiltration, emt
+--------------------------------------------------------------------------------
+
+Cluster 4:
+Highly expressed: TRNA_Val, SNORD32A, septin 9/TNRC6C fusion, DQ586951, JC002043
+Enriched pathways: cellular phosphate ion homeostasis (GO:0030643), cellular trivalent inorganic anion homeostasis (GO:0072502), phosphate ion homeostasis (GO:0055062)
+Signatures: basal_like
+--------------------------------------------------------------------------------

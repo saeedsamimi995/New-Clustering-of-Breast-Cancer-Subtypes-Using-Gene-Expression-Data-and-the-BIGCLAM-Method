@@ -935,28 +935,6 @@ def main():
                 import traceback
                 traceback.print_exc()
     
-    # Step 17: Figure 2 - BIGCLAM vs PAM50 vs IHC Comparison
-    if 'figure2_comparison' in steps_to_run:
-        print("\n" + "="*80)
-        print("STEP 17: FIGURE 2 - BIGCLAM vs PAM50 vs IHC COMPARISON")
-        print("="*80)
-        
-        for dataset_name in ['tcga', 'gse96058']:
-            print(f"\n[Creating] Figure 2 comparison for {dataset_name}...")
-            try:
-                from src.visualization.figure2_bigclam_pam50_ihc import create_figure2_bigclam_pam50_ihc
-                create_figure2_bigclam_pam50_ihc(
-                    dataset_name=dataset_name,
-                    output_dir='figures',
-                    processed_dir='data/processed',
-                    clustering_dir='data/clusterings',
-                    clinical_dir='data'
-                )
-            except Exception as e:
-                print(f"[Error] Failed to create Figure 2 comparison for {dataset_name}: {e}")
-                import traceback
-                traceback.print_exc()
-    
     # Final summary
     print("\n" + "="*80)
     print("PIPELINE COMPLETE!")

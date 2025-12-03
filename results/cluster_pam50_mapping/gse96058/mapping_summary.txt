@@ -1,0 +1,30 @@
+Cluster-PAM50 Mapping Summary: GSE96058
+================================================================================
+
+NMI vs PAM50: 0.0010
+ARI vs PAM50: -0.0013
+Number of BIGCLAM clusters: 5
+Number of PAM50 types: 5
+
+Cluster Details:
+--------------------------------------------------------------------------------
+
+Cluster 0 (n=806):
+  Dominant PAM50: pam50 subtype: LumA (50.9%)
+  Mixed subtypes: pam50 subtype: LumA: 410 (50.9%), pam50 subtype: LumB: 194 (24.1%), pam50 subtype: Basal: 78 (9.7%), pam50 subtype: Her2: 77 (9.6%), pam50 subtype: Normal: 47 (5.8%)
+
+Cluster 1 (n=604):
+  Dominant PAM50: pam50 subtype: LumA (50.3%)
+  Mixed subtypes: pam50 subtype: LumA: 304 (50.3%), pam50 subtype: LumB: 138 (22.8%), pam50 subtype: Basal: 65 (10.8%), pam50 subtype: Her2: 57 (9.4%), pam50 subtype: Normal: 40 (6.6%)
+
+Cluster 2 (n=546):
+  Dominant PAM50: pam50 subtype: LumA (51.6%)
+  Mixed subtypes: pam50 subtype: LumA: 282 (51.6%), pam50 subtype: LumB: 120 (22.0%), pam50 subtype: Her2: 59 (10.8%), pam50 subtype: Basal: 54 (9.9%), pam50 subtype: Normal: 31 (5.7%)
+
+Cluster 3 (n=891):
+  Dominant PAM50: pam50 subtype: LumA (48.5%)
+  Mixed subtypes: pam50 subtype: LumA: 432 (48.5%), pam50 subtype: LumB: 199 (22.3%), pam50 subtype: Her2: 99 (11.1%), pam50 subtype: Basal: 94 (10.5%), pam50 subtype: Normal: 67 (7.5%)
+
+Cluster 4 (n=562):
+  Dominant PAM50: pam50 subtype: LumA (50.0%)
+  Mixed subtypes: pam50 subtype: LumA: 281 (50.0%), pam50 subtype: LumB: 116 (20.6%), pam50 subtype: Basal: 69 (12.3%), pam50 subtype: Her2: 56 (10.0%), pam50 subtype: Normal: 40 (7.1%)
